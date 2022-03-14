@@ -1,0 +1,5 @@
+*.DotSettings.user
+*.swp
+/.idea/
+main.err
+main.out

@@ -1,0 +1,8 @@
+./algorithm/bin
+./algorithm/obj
+./cli/bin
+./cli/obj
+./data-layer/bin
+./data-layer/obj
+./transform/bin
+./transform/obj

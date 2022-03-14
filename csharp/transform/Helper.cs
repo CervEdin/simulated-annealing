@@ -11,25 +11,25 @@ namespace transform
         // ReSharper disable once UnusedMember.Local
         private static double Distance(
             ((int, int), (int, int)) tp
-        )
-            => Distance(tp.Item1, tp.Item2);
+        ) => Distance(tp.Item1, tp.Item2);
 
         private static double Distance(
             (int x, int y) p1,
             (int x, int y) p2
-        )
-            => Math.Sqrt(Math.Pow(p1.x - p2.x, 2) + Math.Pow(p1.y - p2.y, 2));
+        ) => Math.Sqrt(Math.Pow(p1.x - p2.x, 2) + Math.Pow(p1.y - p2.y, 2));
 
         public static double[][] ToMatrix(
             this IList<Customer> customers,
             Reindexer reindexer
         )
-            => ToMatrix(
+        {
+            return ToMatrix(
                 reindexer
                     .AllIndexes
                     .Select(reindexer.CustomerId)
                     .Select(i => customers[i].Coords)
             );
+        }
 
         private static double[][] ToMatrix(
             this IEnumerable<(int, int)> self
@@ -46,7 +46,7 @@ namespace transform
             Reindexer reindexer
         )
         {
-            var usedVehicles = solution.Count();
+            int usedVehicles = solution.Count();
             int lastDepot = usedVehicles * 2 - 1;
             var addedDepots = solution
                 .Select((route, i) =>
@@ -55,7 +55,7 @@ namespace transform
                             .Select(id => reindexer
                                 .CustomerIndexes(id)
                                 .FirstOrDefault()))
-                        .Concat(new[] { (2 * i) + 1 })
+                        .Concat(new[] { 2 * i + 1 })
                 );
             var missingDepots = reindexer.DepotIndexes
                 .Where(i => i > lastDepot)
@@ -66,7 +66,7 @@ namespace transform
                 .Select(tp => (tp.First.x, tp.Second, tp.First.i))
                 .Where(tp => tp.i % 2 == 0)
                 .Select(tp => new[] { tp.x, tp.Second });
-            IEnumerable<IEnumerable<int>> addedMissingRoutes = addedDepots
+            var addedMissingRoutes = addedDepots
                 .Concat(depotPairs);
             var res = addedMissingRoutes
                 .SelectMany(x => x);
@@ -76,18 +76,14 @@ namespace transform
 
     public class Reindexer
     {
-        private readonly int _nVehicles;
         private readonly int _nCustomers;
+        private readonly int _nVehicles;
 
-        public int CustomerId(int index)
-            => DepotIndexes.Contains(index)
-                ? 0
-                : index - DepotIndexes.Last();
-
-        public IEnumerable<int> CustomerIndexes(int id)
-            => id == 0
-                ? DepotIndexes
-                : VisitIndexes.Where(i => i - DepotIndexes.Last() == id);
+        public Reindexer(int nVehicles, int nCustomers)
+        {
+            _nVehicles = nVehicles;
+            _nCustomers = nCustomers;
+        }
 
         public IEnumerable<int> AllIndexes
             => DepotIndexes.Concat(VisitIndexes);
@@ -98,10 +94,15 @@ namespace transform
         private IEnumerable<int> VisitIndexes
             => Enumerable.Range(DepotIndexes.Last() + 1, _nCustomers);
 
-        public Reindexer(int nVehicles, int nCustomers)
+        public int CustomerId(int index) => DepotIndexes.Contains(index)
+            ? 0
+            : index - DepotIndexes.Last();
+
+        public IEnumerable<int> CustomerIndexes(int id)
         {
-            _nVehicles = nVehicles;
-            _nCustomers = nCustomers;
+            return id == 0
+                ? DepotIndexes
+                : VisitIndexes.Where(i => i - DepotIndexes.Last() == id);
         }
     }
 }

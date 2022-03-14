@@ -6,7 +6,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\data-layer\data-layer.csproj" />
+        <ProjectReference Include="..\data-layer\data-layer.csproj"/>
     </ItemGroup>
 
 </Project>

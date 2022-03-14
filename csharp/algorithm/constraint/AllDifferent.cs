@@ -7,16 +7,22 @@ namespace algorithm.constraint
     {
         public static bool IsValid(
             this ICollection<int> ints
-        ) => ints.Count == ints.ToHashSet().Count;
+        )
+        {
+            return ints.Count == ints.ToHashSet().Count;
+        }
     }
 
     public static class Circuit
     {
         public static bool IsValid(
             this ICollection<int> ints
-        ) => ints
-            .Select((x, i) => (x, i))
-            .All(tp => tp.x != tp.i);
+        )
+        {
+            return ints
+                .Select((x, i) => (x, i))
+                .All(tp => tp.x != tp.i);
+        }
     }
 }
 
@@ -26,12 +32,18 @@ namespace algorithm
     {
         public static bool AllDifferent(
             this ICollection<int> ints
-        ) => ints.Count == ints.ToHashSet().Count;
+        )
+        {
+            return ints.Count == ints.ToHashSet().Count;
+        }
 
         public static bool Circuit(
             this ICollection<int> ints
-        ) => ints
-            .Select((x, i) => (x, i))
-            .All(tp => tp.x != tp.i);
+        )
+        {
+            return ints
+                .Select((x, i) => (x, i))
+                .All(tp => tp.x != tp.i);
+        }
     }
 }

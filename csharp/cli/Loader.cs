@@ -14,20 +14,23 @@ namespace cli
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
         };
 
+        private readonly string _nr;
+
         private readonly string _type;
         private readonly string _version;
-        private readonly string _nr;
-        private string Name => $"{_type}{_version}{_nr}";
 
         public Loader(
             string type = "c",
             string version = "1",
-            string nr = "01")
+            string nr = "01"
+        )
         {
             _type = type;
             _version = version;
             _nr = nr;
         }
+
+        private string Name => $"{_type}{_version}{_nr}";
 
         public Instance Instance()
         {

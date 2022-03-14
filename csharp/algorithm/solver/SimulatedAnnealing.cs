@@ -1,74 +1,10 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
+using algorithm.constraint;
 
-// ReSharper disable once CheckNamespace
 namespace algorithm.solver
 {
-    public class Circuit
-    {
-        public readonly int[] Successors;
-
-        public Circuit(IEnumerable<int> successors)
-        {
-            var ss = successors.ToArray();
-            if (!ss.AllDifferent() || !ss.Circuit())
-                throw new ArgumentOutOfRangeException(nameof(successors));
-            Successors = ss.ToArray();
-        }
-
-        public Route ToRoute()
-        {
-            var rr = new int[Successors.Length];
-
-            int i = 0;
-            int current = i;
-            int successor = Successors[current];
-            while (i < rr.Length)
-            {
-                rr[i] = current;
-                current = successor;
-                successor = Successors[current];
-                i++;
-            }
-
-            return new Route(rr);
-        }
-    }
-
-    public class Route
-    {
-        public int[] List;
-
-        public Route(ICollection<int> ints)
-        {
-            if (!ints.AllDifferent())
-                throw new ArgumentOutOfRangeException(nameof(ints));
-            List = ints.ToArray();
-        }
-
-        public Circuit ToCircuit()
-        {
-            var circuit = new int[List.Length];
-
-            int current_i = 0;
-            int current = List[current_i];
-            int successor_i = current_i + 1;
-            int successor = List[successor_i];
-            while (current_i < circuit.Length)
-            {
-                circuit[current] = successor;
-                current = successor;
-                successor_i = (successor_i + 1) % circuit.Length;
-                successor = List[successor_i];
-                current_i++;
-            }
-
-            return new Circuit(circuit);
-        }
-    }
-
     public enum ReductionFunction
     {
         linear,
@@ -78,10 +14,8 @@ namespace algorithm.solver
 
     public class SimulatedAnnealing
     {
-        private readonly Random _random = new(1);
         private readonly int _alpha;
         private readonly int _beta;
-        private int _currTemp;
 
         private readonly Action _decrementRule;
         private readonly Func<IEnumerable<int>, double> _evaluate;
@@ -93,6 +27,10 @@ namespace algorithm.solver
             IList<int>
         > _neighborhoodSelector;
 
+        private readonly Random _random = new(1);
+        private int[] _bestSuccessors;
+        private int _currTemp;
+
         private int[] _successors;
 
         public SimulatedAnnealing(
@@ -102,12 +40,12 @@ namespace algorithm.solver
             int initialTemp = 10,
             int finalTemp = 1,
             ReductionFunction tempReduction = ReductionFunction.linear,
-            int iterationPerTemp = 10,
+            int iterationPerTemp = 100,
             int alpha = 10,
             int beta = 5
         )
         {
-            //logging.debug(f'evaluator: {solutionEvaluator}')
+            _bestSuccessors = initialSolution.Successors;
             _successors = initialSolution.Successors;
             _evaluate = solutionEvaluator;
             _currTemp = initialTemp;
@@ -117,30 +55,37 @@ namespace algorithm.solver
             _beta = beta;
             _neighborhoodSelector = neighborhoodSelector;
 
-            if (tempReduction == ReductionFunction.linear)
-                _decrementRule = LinearTempReduction;
-            // else if (tempReduction == "geometric")
-            // this.decrementRule = this.geometricTempReduction;
-            // else if (tempReduction == "slowDecrease")
-            // this.decrementRule = this.slowDecreaseTempReduction;
-            // else
-            // this.decrementRule = tempReduction
+            _decrementRule = tempReduction switch
+            {
+                ReductionFunction.linear => LinearTempReduction,
+                ReductionFunction.geometric => GeometricTempReduction,
+                ReductionFunction.slowDecrease => SlowDecreaseTempReduction,
+                _ => throw new ArgumentOutOfRangeException()
+            };
         }
 
         private void LinearTempReduction() => _currTemp -= _alpha;
 
-        // ReSharper disable once UnusedMember.Local
-        private void GeometricTempReduction() =>
-            _currTemp *= 1 / _alpha;
+        private void GeometricTempReduction() => _currTemp *= 1 / _alpha;
 
-        // ReSharper disable once UnusedMember.Local
-        private void SlowDecreaseTempReduction() =>
-            _currTemp = _currTemp / (1 + _beta * _currTemp);
+        private void SlowDecreaseTempReduction() => _currTemp /= 1 + _beta * _currTemp;
 
-        private bool IsTerminationCriteriaMet()
+        private bool IsTerminationCriteriaMet() =>
+            _currTemp <= _finalTemp
+            || !_neighborhoodSelector(_successors).Any();
+
+
+        private (int a, int b) Swapper(IList<int> successors)
         {
-            // can add more termination criteria
-            return _currTemp <= _finalTemp || _neighborhoodSelector(_successors).Any();
+            // pick a random to swap
+            var a = _random.Next(0, successors.Count);
+            // can't swap with successor (creates cycle)
+            // TODO: verify
+            var candidates = successors
+                .Where(b => b != successors[a])
+                .ToList(); // TODO: Optimize
+            var b = candidates[_random.Next(0, candidates.Count)];
+            return (a, b);
         }
 
         public Circuit Run()
@@ -153,34 +98,40 @@ namespace algorithm.solver
                     var successors = _neighborhoodSelector(_successors);
 
                     //logging.debug(f's-neighbors: {neighbors}')
-                    // pick a random to swap
-                    var toSwap = _random.Next(0, successors.Count);
+                    (var a, var b) = Swapper(successors);
 
-                    //logging.debug(f'chosen: {to_change}')
-                    var successor = successors[toSwap];
                     var newSolution = successors
-                        .Select(x =>
-                            x != toSwap && x != successor
-                                ? x
-                                : x == toSwap
-                                    ? successor
-                                    : toSwap)
+                        .Select((s, i) =>
+                            i != a || i != b
+                                ? s
+                                : i == a
+                                    ? successors[b]
+                                    : successors[a])
                         .ToArray();
-
+                    var x = newSolution[a];
+                    var y = newSolution[b];
+                    if (!Circuit.Valid(newSolution) || !new Circuit(newSolution).ToRoute().Valid())
+                        throw new ArgumentOutOfRangeException();
                     //logging.debug(f's-new-sol: {newSolution}')
                     // get the cost between the two solutions
                     var cost = _evaluate(_successors) - _evaluate(newSolution);
                     // if the new solution is better, accept it
                     if (cost >= 0)
+                    {
                         _successors = newSolution;
+                        _bestSuccessors = newSolution;
+                    }
                     // if the new solution is not better, accept it with a probability of e^(-cost/temp)
                     else if (_random.NextDouble() < Math.Exp(-cost / _currTemp))
+                    {
                         _successors = newSolution;
+                    }
+
                     // decrement the temperature
                     _decrementRule();
                 }
 
-            return new Circuit(_successors);
+            return new Circuit(_bestSuccessors);
         }
 
         //logging.info(f'stopping solver')

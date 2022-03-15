@@ -7,9 +7,9 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\algorithm\algorithm.csproj" />
-        <ProjectReference Include="..\data-layer\data-layer.csproj" />
-        <ProjectReference Include="..\transform\transform.csproj" />
+        <ProjectReference Include="..\algorithm\algorithm.csproj"/>
+        <ProjectReference Include="..\data_layer\data_layer.csproj"/>
+        <ProjectReference Include="..\transform\transform.csproj"/>
     </ItemGroup>
 
     <ItemGroup>

@@ -75,32 +75,6 @@ namespace algorithm.solver
         private bool IsTerminationCriteriaMet() =>
             _currTemp <= _finalTemp
             || !_neighborhoodSelector(_successors).Any();
-        
-        private (int c, int s) Picker(IList<int?> successors)
-        {
-            Debug.Assert(successors.Any(x => x != null));
-            // pick a random to swap
-            var arr = successors
-                .Select((c, s) => (c, s))
-                .Where(tp => tp.c != null);
-            // TODO: >= or >
-            var a = arr.FirstOrDefault(_ => _random.NextDouble() >= 0.5);
-            a = a.c != null ? a : arr.First();
-            return ((int c, int s))a;
-        }
-
-        private (int a, int b) Mover(IList<int?> successors)
-        {
-            (int c, int s) = Picker(successors);
-            // can't swap with successor (creates cycle)
-            // TODO: verify
-            var candidates = successors
-                .Where(b => b != s)
-                .Where(b => b != null)
-                .ToList(); // TODO: Optimize
-            var b = candidates[_random.Next(0, candidates.Count)];
-            return (c, b ?? throw new NullReferenceException());
-        }
 
         public Circuit Run()
         {
@@ -112,15 +86,16 @@ namespace algorithm.solver
                     var neighborhood = _neighborhoodSelector(_successors);
 
                     //logging.debug(f's-neighbors: {neighbors}')
-                    (var a, var b) = Mover(neighborhood);
+                    var moves = Explorer.Mover(
+                        neighborhood,
+                        _predecessors,
+                        _random).ToArray();
 
                     int[] candidateSolution = _successors
                         .Select((s, i) =>
-                            i != a || i != b
-                                ? s
-                                : i == a
-                                    ? neighborhood[b] ?? throw new NullReferenceException()
-                                    : neighborhood[a] ?? throw new NullReferenceException())
+                            (i, s, new_s: moves.SingleOrDefault(tp => tp.i == i).s)
+                        )
+                        .Select(tp => tp.i != tp.new_s ? tp.new_s : tp.s)
                         .ToArray();
                     if (!Circuit.Valid(candidateSolution) || !new Circuit(candidateSolution).ToRoute().Valid())
                         throw new ArgumentOutOfRangeException();

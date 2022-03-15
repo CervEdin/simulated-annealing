@@ -7,9 +7,15 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\algorithm\algorithm.csproj"/>
-        <ProjectReference Include="..\data-layer\data-layer.csproj"/>
-        <ProjectReference Include="..\transform\transform.csproj"/>
+        <ProjectReference Include="..\algorithm\algorithm.csproj" />
+        <ProjectReference Include="..\data-layer\data-layer.csproj" />
+        <ProjectReference Include="..\transform\transform.csproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <Content Include="..\..\solomon-vrptw-benchmarks\**\*.json"
+                 LinkBase="solomon-vrptw-benchmarks"
+                 CopyToOutputDirectory="Always"/>
     </ItemGroup>
 
 </Project>

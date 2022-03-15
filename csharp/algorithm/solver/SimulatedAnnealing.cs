@@ -106,15 +106,15 @@ namespace algorithm.solver
         {
             while (!IsTerminationCriteriaMet())
                 // iterate that number of times
-                foreach (var _ in Enumerable.Range(0, _iterationPerTemp))
+                foreach (int _ in Enumerable.Range(0, _iterationPerTemp))
                 {
                     // get neighbors (all successors)
-                    IList<int?> neighborhood = _neighborhoodSelector(_successors);
+                    var neighborhood = _neighborhoodSelector(_successors);
 
                     //logging.debug(f's-neighbors: {neighbors}')
                     (var a, var b) = Mover(neighborhood);
 
-                    var candidateSolution = _successors
+                    int[] candidateSolution = _successors
                         .Select((s, i) =>
                             i != a || i != b
                                 ? s
@@ -126,7 +126,7 @@ namespace algorithm.solver
                         throw new ArgumentOutOfRangeException();
                     //logging.debug(f's-new-sol: {newSolution}')
                     // get the cost between the two solutions
-                    var cost = _evaluate(_successors) - _evaluate(candidateSolution);
+                    double cost = _evaluate(_successors) - _evaluate(candidateSolution);
                     // if the new solution is better, accept it
                     if (cost >= 0)
                     {

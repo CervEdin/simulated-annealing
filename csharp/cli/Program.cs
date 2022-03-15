@@ -12,7 +12,6 @@ namespace cli
 {
     internal static class Program
     {
-
         public static JsonSerializerOptions Options = new()
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -58,43 +57,22 @@ namespace cli
             Result result = loader.Result();
             Reindexer reindexer = new(instance.nVehicles, instance.Customers.Count - 1);
             Route optimalRoute = new(result.Solution.ToCircuit(reindexer).ToArray());
-            Circuit? optimalCircuit = optimalRoute.ToCircuit();
+            var optimalCircuit = optimalRoute.ToCircuit();
             Test(optimalCircuit, optimalRoute);
             // ReSharper disable once CoVariantArrayConversion
             IList<IList<double>> matrix = instance.Customers.ToMatrix(reindexer);
-            var optimalCost = optimalCircuit.CostObjective(matrix);
+            double optimalCost = optimalCircuit.CostObjective(matrix);
             Debug.Assert(Math.Abs(828.94 - optimalCost) > 0.01);
             Circuit initial = optimalCircuit;
 
-            Func<IEnumerable<int>, double> evaluator = x => CostObjective(new Circuit(x), matrix);
-            Func<IEnumerable<int>, IList<int?>> neighborOperator = NeighborhoodSelector;
+            Func<IEnumerable<int>, double> evaluator = x => new Circuit(x).CostObjective(matrix);
+            Func<IEnumerable<int>, IList<int?>> neighborOperator =
+                e => Explorer.NeighborhoodSelector(e, reindexer.DepotIndexes);
 
             SimulatedAnnealing solver = new(initial, evaluator, neighborOperator);
-            Circuit? solution = solver.Run();
-            var cost = solution.CostObjective(matrix);
+            var solution = solver.Run();
+            double cost = solution.CostObjective(matrix);
             Console.WriteLine($"found solution cost:\t{cost}");
         }
-
-        private static List<int?> NeighborhoodSelector(
-            IEnumerable<int> enumerable
-        )
-        {
-            return enumerable.Select(x => (int?)x).ToList();
-        }
-
-        private static double CostObjective(
-            this Circuit c,
-            IList<IList<double>> m
-        ) =>
-            CostObjective(c.ToRoute().List, m);
-
-        private static double CostObjective(
-            ICollection<int> route,
-            IList<IList<double>> m
-        ) =>
-            route
-                .Zip(route.Skip(1))
-                .Select(ss => m[ss.First][ss.Second])
-                .Sum();
     }
 }

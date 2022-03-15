@@ -32,6 +32,7 @@ namespace algorithm.solver
         private int _currTemp;
 
         private int[] _successors;
+        private readonly int[] _predecessors;
 
         public SimulatedAnnealing(
             Circuit initialSolution,
@@ -47,6 +48,7 @@ namespace algorithm.solver
         {
             _bestSuccessors = initialSolution.Successors;
             _successors = initialSolution.Successors;
+            _predecessors = initialSolution.Successors.Predecessors().ToArray();
             _evaluate = solutionEvaluator;
             _currTemp = initialTemp;
             _finalTemp = finalTemp;

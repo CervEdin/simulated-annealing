@@ -38,4 +38,11 @@ namespace algorithm.constraint
 
         public static bool Valid(int[] circuit) => circuit.AllDifferent() && circuit.Circuit();
     }
+
+    public static class CircuitHelper
+    {
+        internal static IEnumerable<int> Predecessors(this IList<int> successors)
+            => successors
+                .Select((succ, current) => successors.IndexOf(current));
+    }
 }

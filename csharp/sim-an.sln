@@ -2,7 +2,7 @@
 Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "cli", "cli\cli.csproj", "{8C48380C-6501-45EB-B575-E12866082993}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "data-layer", "data-layer\data-layer.csproj", "{27B789B1-CAF9-4988-B84B-6728E8E91ABE}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "data_layer", "data_layer\data_layer.csproj", "{27B789B1-CAF9-4988-B84B-6728E8E91ABE}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "algorithm", "algorithm\algorithm.csproj", "{98C79A25-6AA2-43AC-B7B1-3705DFFDD3A6}"
 EndProject

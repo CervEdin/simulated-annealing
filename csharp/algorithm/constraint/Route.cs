@@ -15,6 +15,8 @@ namespace algorithm.constraint
             List = ints.ToArray();
         }
 
+        public static bool Valid(IList<int> ints) => ints.AllDifferent();
+
         public Circuit ToCircuit()
         {
             int[] circuit = new int[List.Length];
@@ -35,6 +37,7 @@ namespace algorithm.constraint
             return new Circuit(circuit);
         }
 
-        public bool Valid() => List.AllDifferent();
+        [Obsolete("should be valid at creation")]
+        public bool Valid() => Valid(List);
     }
 }

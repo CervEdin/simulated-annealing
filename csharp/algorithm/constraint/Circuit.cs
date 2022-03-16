@@ -11,10 +11,15 @@ namespace algorithm.constraint
         public Circuit(IEnumerable<int> successors)
         {
             int[] ss = successors.ToArray();
-            if (!ss.AllDifferent() || !ss.Circuit())
+            if (!Valid(ss))
                 throw new ArgumentOutOfRangeException(nameof(successors));
             Successors = ss.ToArray();
         }
+
+        public static bool Valid(IList<int> circuit)
+            => circuit.Circuit()
+               // TODO: Needed? Circuit implies AllDifferent
+               && circuit.AllDifferent();
 
         // TODO: test
         public Route ToRoute()

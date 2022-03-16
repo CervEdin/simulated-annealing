@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using algorithm.solver;
 
 namespace algorithm.constraint
 {

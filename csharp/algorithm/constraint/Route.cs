@@ -1,9 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using algorithm.constraint;
 
-namespace algorithm.solver
+namespace algorithm.constraint
 {
     public class Route
     {

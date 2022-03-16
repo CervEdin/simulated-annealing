@@ -67,7 +67,7 @@ namespace cli
             Circuit initial = optimalCircuit;
 
             Func<IEnumerable<int>, double> evaluator = x => CostObjective(new Circuit(x), matrix);
-            Func<IEnumerable<int>, IList<int>> neighborOperator = NeighborhoodSelector;
+            Func<IEnumerable<int>, IList<int?>> neighborOperator = NeighborhoodSelector;
 
             SimulatedAnnealing solver = new(initial, evaluator, neighborOperator);
             Circuit? solution = solver.Run();
@@ -75,11 +75,11 @@ namespace cli
             Console.WriteLine($"found solution cost:\t{cost}");
         }
 
-        private static IList<int> NeighborhoodSelector(
-            IEnumerable<int> arg
+        private static List<int?> NeighborhoodSelector(
+            IEnumerable<int> enumerable
         )
         {
-            return arg.Select(x => x).ToList();
+            return enumerable.Select(x => (int?)x).ToList();
         }
 
         private static double CostObjective(

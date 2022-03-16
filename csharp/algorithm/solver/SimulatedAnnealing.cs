@@ -24,7 +24,7 @@ namespace algorithm.solver
 
         private readonly Func<
             IEnumerable<int>,
-            IList<int>
+            IList<int?>
         > _neighborhoodSelector;
 
         private readonly Random _random = new(1);
@@ -36,7 +36,7 @@ namespace algorithm.solver
         public SimulatedAnnealing(
             Circuit initialSolution,
             Func<IEnumerable<int>, double> solutionEvaluator,
-            Func<IEnumerable<int>, IList<int>> neighborhoodSelector,
+            Func<IEnumerable<int>, IList<int?>> neighborhoodSelector,
             int initialTemp = 10,
             int finalTemp = 1,
             ReductionFunction tempReduction = ReductionFunction.linear,
@@ -75,17 +75,17 @@ namespace algorithm.solver
             || !_neighborhoodSelector(_successors).Any();
 
 
-        private (int a, int b) Swapper(IList<int> successors)
+        private (int a, int b) Mover(IList<int?> successors)
         {
-            // pick a random to swap
-            var a = _random.Next(0, successors.Count);
+            (int c, int s) = Picker(successors);
             // can't swap with successor (creates cycle)
             // TODO: verify
             var candidates = successors
-                .Where(b => b != successors[a])
+                .Where(b => b != s)
+                .Where(b => b != null)
                 .ToList(); // TODO: Optimize
             var b = candidates[_random.Next(0, candidates.Count)];
-            return (a, b);
+            return (c, b ?? throw new NullReferenceException());
         }
 
         public Circuit Run()
@@ -95,36 +95,34 @@ namespace algorithm.solver
                 foreach (var _ in Enumerable.Range(0, _iterationPerTemp))
                 {
                     // get neighbors (all successors)
-                    var successors = _neighborhoodSelector(_successors);
+                    IList<int?> neighborhood = _neighborhoodSelector(_successors);
 
                     //logging.debug(f's-neighbors: {neighbors}')
-                    (var a, var b) = Swapper(successors);
+                    (var a, var b) = Mover(neighborhood);
 
-                    var newSolution = successors
+                    var candidateSolution = _successors
                         .Select((s, i) =>
                             i != a || i != b
                                 ? s
                                 : i == a
-                                    ? successors[b]
-                                    : successors[a])
+                                    ? neighborhood[b] ?? throw new NullReferenceException()
+                                    : neighborhood[a] ?? throw new NullReferenceException())
                         .ToArray();
-                    var x = newSolution[a];
-                    var y = newSolution[b];
-                    if (!Circuit.Valid(newSolution) || !new Circuit(newSolution).ToRoute().Valid())
+                    if (!Circuit.Valid(candidateSolution) || !new Circuit(candidateSolution).ToRoute().Valid())
                         throw new ArgumentOutOfRangeException();
                     //logging.debug(f's-new-sol: {newSolution}')
                     // get the cost between the two solutions
-                    var cost = _evaluate(_successors) - _evaluate(newSolution);
+                    var cost = _evaluate(_successors) - _evaluate(candidateSolution);
                     // if the new solution is better, accept it
                     if (cost >= 0)
                     {
-                        _successors = newSolution;
-                        _bestSuccessors = newSolution;
+                        _successors = candidateSolution;
+                        _bestSuccessors = candidateSolution;
                     }
                     // if the new solution is not better, accept it with a probability of e^(-cost/temp)
                     else if (_random.NextDouble() < Math.Exp(-cost / _currTemp))
                     {
-                        _successors = newSolution;
+                        _successors = candidateSolution;
                     }
 
                     // decrement the temperature

@@ -73,7 +73,19 @@ namespace algorithm.solver
         private bool IsTerminationCriteriaMet() =>
             _currTemp <= _finalTemp
             || !_neighborhoodSelector(_successors).Any();
-
+        
+        private (int c, int s) Picker(IList<int?> successors)
+        {
+            Debug.Assert(successors.Any(x => x != null));
+            // pick a random to swap
+            var arr = successors
+                .Select((c, s) => (c, s))
+                .Where(tp => tp.c != null);
+            // TODO: >= or >
+            var a = arr.FirstOrDefault(_ => _random.NextDouble() >= 0.5);
+            a = a.c != null ? a : arr.First();
+            return ((int c, int s))a;
+        }
 
         private (int a, int b) Mover(IList<int?> successors)
         {

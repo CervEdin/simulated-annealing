@@ -28,7 +28,8 @@ namespace tests.algorithm
             ReductionFunction reduction,
             double alpha = 0.9,
             double beta = 0.01,
-            IEnumerable<int> fixedIndexes = null
+            IEnumerable<int> fixedIndexes = null,
+            Func<IEnumerable<int>, bool> isFeasible = null
         ) => new(
             Initial,
             Cost,
@@ -38,7 +39,8 @@ namespace tests.algorithm
             tempReduction: reduction,
             iterationPerTemp: 200,
             alpha: alpha,
-            beta: beta);
+            beta: beta,
+            isFeasible: isFeasible);
 
         [Theory]
         [InlineData(ReductionFunction.linear, 0.05)]
@@ -50,6 +52,39 @@ namespace tests.algorithm
             Circuit solution = solver.Run();
             Assert.Equal(OptimalCost, Cost(solution.Successors), 6);
             Assert.Equal(OptimalCost, solver.BestCost, 6);
+            Assert.True(solver.FoundFeasible);
+        }
+
+        [Fact]
+        public void ReturnsTheBestFeasibleSolution()
+        {
+            // The initial solution goes from 0 to 6, the optimal circuits from 0 to 1 or 11
+            var solver = Solver(ReductionFunction.geometric, isFeasible: s => s.First() == 6);
+            Circuit solution = solver.Run();
+            Assert.True(solver.FoundFeasible);
+            Assert.Equal(6, solution.Successors[0]);
+            Assert.Equal(Cost(solution.Successors), solver.BestCost);
+            Assert.True(solver.BestCost < Cost(Initial.Successors));
+            Assert.True(solver.BestCost > OptimalCost + 1);
+        }
+
+        [Fact]
+        public void FindsAFeasibleSolutionFromAnInfeasibleStart()
+        {
+            var solver = Solver(ReductionFunction.geometric, isFeasible: s => s.First() == 1);
+            Circuit solution = solver.Run();
+            Assert.True(solver.FoundFeasible);
+            Assert.Equal(1, solution.Successors[0]);
+            Assert.Equal(OptimalCost, solver.BestCost, 6);
+        }
+
+        [Fact]
+        public void WithoutFeasibleSolutionsReturnsTheBest()
+        {
+            var solver = Solver(ReductionFunction.geometric, isFeasible: _ => false);
+            Circuit solution = solver.Run();
+            Assert.False(solver.FoundFeasible);
+            Assert.Equal(OptimalCost, Cost(solution.Successors), 6);
         }
 
         [Fact]

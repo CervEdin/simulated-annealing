@@ -13,15 +13,21 @@ namespace algorithm.solver
         slowDecrease
     }
 
+    public enum PenaltyUpdate
+    {
+        constant,
+        cooling
+    }
+
     public class SimulatedAnnealing
     {
         private readonly double _alpha;
         private readonly double _beta;
 
         private readonly Action _decrementRule;
-        private readonly Func<IEnumerable<int>, double> _evaluate;
-        private readonly Func<IEnumerable<int>, bool> _isFeasible;
+        private readonly Func<IEnumerable<int>, (double cost, double violation)> _evaluate;
         private readonly double _finalTemp;
+        private readonly double _initialTemp;
         private readonly int _iterationPerTemp;
 
         private readonly Func<
@@ -29,18 +35,27 @@ namespace algorithm.solver
             IList<int?>
         > _neighborhoodSelector;
 
+        private readonly double _initialPenalty;
+        private readonly PenaltyUpdate _penaltyUpdate;
+
         private readonly Random _random;
         private int[] _bestSuccessors;
         private double _bestCost;
-        private bool _foundFeasible;
+        private double _bestViolation;
         private double _currTemp;
+        private double _penalty;
 
         private int[] _successors;
         private double _cost;
+        private double _violation;
         private int[] _predecessors;
 
         /// <param name="initialSolution"></param>
-        /// <param name="solutionEvaluator">The cost of a solution given as successors</param>
+        /// <param name="solutionEvaluator">
+        /// The cost of a solution given as successors, and how much it violates the constraints (&gt;= 0), 0 if it is
+        /// feasible.
+        /// Annealing moves on the cost plus the penalty times the violation.
+        /// </param>
         /// <param name="neighborhoodSelector">The successors that may change, null for fixed ones</param>
         /// <param name="initialTemp"></param>
         /// <param name="finalTemp">Must be positive</param>
@@ -49,13 +64,14 @@ namespace algorithm.solver
         /// <param name="alpha">linear: the step (&gt; 0), geometric: the factor (between 0 and 1)</param>
         /// <param name="beta">slowDecrease: T = T / (1 + beta * T) (&gt; 0)</param>
         /// <param name="seed">Seed for the random number generator</param>
-        /// <param name="isFeasible">
-        /// Whether a solution satisfies the constraints the cost only penalizes, null if every solution does.
-        /// The best solution is the best feasible one, or the best of all if none is.
+        /// <param name="penalty">The initial penalty per unit of violation (&gt; 0)</param>
+        /// <param name="penaltyUpdate">
+        /// constant: keep the penalty, cooling: multiply it by initialTemp / temp at each temperature,
+        /// so the constraints tighten as the search cools
         /// </param>
         public SimulatedAnnealing(
             Circuit initialSolution,
-            Func<IEnumerable<int>, double> solutionEvaluator,
+            Func<IEnumerable<int>, (double cost, double violation)> solutionEvaluator,
             Func<IEnumerable<int>, IList<int?>> neighborhoodSelector,
             double initialTemp = 10,
             double finalTemp = 1,
@@ -64,29 +80,37 @@ namespace algorithm.solver
             double alpha = 0.9,
             double beta = 0.01,
             int seed = 1,
-            Func<IEnumerable<int>, bool> isFeasible = null
+            double penalty = 1,
+            PenaltyUpdate penaltyUpdate = PenaltyUpdate.constant
         )
         {
             if (finalTemp <= 0)
                 throw new ArgumentOutOfRangeException(nameof(finalTemp));
             if (iterationPerTemp < 1)
                 throw new ArgumentOutOfRangeException(nameof(iterationPerTemp));
+            if (penalty <= 0)
+                throw new ArgumentOutOfRangeException(nameof(penalty));
+            if (!Enum.IsDefined(penaltyUpdate))
+                throw new ArgumentOutOfRangeException(nameof(penaltyUpdate));
 
             _successors = initialSolution.Successors.ToArray();
             _predecessors = _successors.Predecessors();
             _evaluate = solutionEvaluator;
-            _cost = _evaluate(_successors);
-            _isFeasible = isFeasible ?? (_ => true);
+            (_cost, _violation) = _evaluate(_successors);
             _bestSuccessors = _successors;
             _bestCost = _cost;
-            _foundFeasible = _isFeasible(_successors);
+            _bestViolation = _violation;
             _currTemp = initialTemp;
+            _initialTemp = initialTemp;
             _finalTemp = finalTemp;
             _iterationPerTemp = iterationPerTemp;
             _alpha = alpha;
             _beta = beta;
             _neighborhoodSelector = neighborhoodSelector;
             _random = new Random(seed);
+            _initialPenalty = penalty;
+            _penalty = penalty;
+            _penaltyUpdate = penaltyUpdate;
 
             _decrementRule = tempReduction switch
             {
@@ -106,12 +130,20 @@ namespace algorithm.solver
 
         private void SlowDecreaseTempReduction() => _currTemp /= 1 + _beta * _currTemp;
 
+        /// <summary>
+        /// The cost of the best solution, without the penalty
+        /// </summary>
         public double BestCost => _bestCost;
 
         /// <summary>
-        /// Whether the best solution is feasible
+        /// Whether the best solution is feasible, if not it is the least violating one found
         /// </summary>
-        public bool FoundFeasible => _foundFeasible;
+        public bool FoundFeasible => _bestViolation == 0;
+
+        /// <summary>
+        /// The current penalty per unit of violation
+        /// </summary>
+        public double Penalty => _penalty;
 
         public Circuit Run()
         {
@@ -121,6 +153,8 @@ namespace algorithm.solver
                     if (!Step())
                         return new Circuit(_bestSuccessors);
                 _decrementRule();
+                if (_penaltyUpdate == PenaltyUpdate.cooling)
+                    _penalty = _initialPenalty * _initialTemp / _currTemp;
             }
 
             return new Circuit(_bestSuccessors);
@@ -144,8 +178,8 @@ namespace algorithm.solver
                 candidateSolution[i] = s;
             Debug.Assert(Circuit.Valid(candidateSolution));
 
-            double candidateCost = _evaluate(candidateSolution);
-            double delta = candidateCost - _cost;
+            (double candidateCost, double candidateViolation) = _evaluate(candidateSolution);
+            double delta = candidateCost - _cost + _penalty * (candidateViolation - _violation);
             // Metropolis criterion: always accept an improvement,
             // accept a worse solution with a probability of e^(-delta/temp)
             if (delta > 0 && _random.NextDouble() >= Math.Exp(-delta / _currTemp))
@@ -153,25 +187,23 @@ namespace algorithm.solver
 
             _successors = candidateSolution;
             _cost = candidateCost;
+            _violation = candidateViolation;
             _predecessors = _successors.Predecessors();
             UpdateBest();
             return true;
         }
 
         /// <summary>
-        /// Keep the current solution if it is the best feasible one, or the best so far while none is feasible
+        /// Keep the current solution if it is the least violating, then the cheapest, so far.
+        /// Once one is feasible the best is the cheapest feasible solution.
         /// </summary>
         private void UpdateBest()
         {
-            // Only check the feasibility of solutions that could replace the best
-            if (_foundFeasible && _cost >= _bestCost)
-                return;
-            bool feasible = _isFeasible(_successors);
-            if (!feasible && (_foundFeasible || _cost >= _bestCost))
+            if (_violation > _bestViolation || _violation == _bestViolation && _cost >= _bestCost)
                 return;
             _bestSuccessors = _successors;
             _bestCost = _cost;
-            _foundFeasible = feasible;
+            _bestViolation = _violation;
         }
     }
 }

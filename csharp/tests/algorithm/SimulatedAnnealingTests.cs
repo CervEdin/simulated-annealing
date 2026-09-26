@@ -22,6 +22,8 @@ namespace tests.algorithm
 
         private static double Cost(IEnumerable<int> successors) => new Circuit(successors).CostObjective(Matrix);
 
+        private static (double, double) Feasible(IEnumerable<int> successors) => (Cost(successors), 0);
+
         private static readonly Circuit Initial = new Route(new[] {0, 6, 1, 7, 2, 8, 3, 9, 4, 10, 5, 11}).ToCircuit();
 
         private static SimulatedAnnealing Solver(
@@ -29,10 +31,12 @@ namespace tests.algorithm
             double alpha = 0.9,
             double beta = 0.01,
             IEnumerable<int> fixedIndexes = null,
-            Func<IEnumerable<int>, bool> isFeasible = null
+            Func<IEnumerable<int>, double> violation = null,
+            double penalty = 1,
+            PenaltyUpdate penaltyUpdate = PenaltyUpdate.constant
         ) => new(
             Initial,
-            Cost,
+            s => (Cost(s), violation?.Invoke(s) ?? 0),
             s => Explorer.NeighborhoodSelector(s, fixedIndexes ?? Enumerable.Empty<int>()),
             initialTemp: 2,
             finalTemp: 0.01,
@@ -40,7 +44,8 @@ namespace tests.algorithm
             iterationPerTemp: 200,
             alpha: alpha,
             beta: beta,
-            isFeasible: isFeasible);
+            penalty: penalty,
+            penaltyUpdate: penaltyUpdate);
 
         [Theory]
         [InlineData(ReductionFunction.linear, 0.05)]
@@ -59,7 +64,7 @@ namespace tests.algorithm
         public void ReturnsTheBestFeasibleSolution()
         {
             // The initial solution goes from 0 to 6, the optimal circuits from 0 to 1 or 11
-            var solver = Solver(ReductionFunction.geometric, isFeasible: s => s.First() == 6);
+            var solver = Solver(ReductionFunction.geometric, violation: s => s.First() == 6 ? 0 : 1);
             Circuit solution = solver.Run();
             Assert.True(solver.FoundFeasible);
             Assert.Equal(6, solution.Successors[0]);
@@ -71,7 +76,7 @@ namespace tests.algorithm
         [Fact]
         public void FindsAFeasibleSolutionFromAnInfeasibleStart()
         {
-            var solver = Solver(ReductionFunction.geometric, isFeasible: s => s.First() == 1);
+            var solver = Solver(ReductionFunction.geometric, violation: s => s.First() == 1 ? 0 : 1);
             Circuit solution = solver.Run();
             Assert.True(solver.FoundFeasible);
             Assert.Equal(1, solution.Successors[0]);
@@ -79,9 +84,9 @@ namespace tests.algorithm
         }
 
         [Fact]
-        public void WithoutFeasibleSolutionsReturnsTheBest()
+        public void TheCheapestAmongTheLeastViolating()
         {
-            var solver = Solver(ReductionFunction.geometric, isFeasible: _ => false);
+            var solver = Solver(ReductionFunction.geometric, violation: _ => 1);
             Circuit solution = solver.Run();
             Assert.False(solver.FoundFeasible);
             Assert.Equal(OptimalCost, Cost(solution.Successors), 6);
@@ -106,7 +111,7 @@ namespace tests.algorithm
             Circuit optimal = new Route(Enumerable.Range(0, N)).ToCircuit();
             SimulatedAnnealing solver = new(
                 optimal,
-                Cost,
+                Feasible,
                 s => Explorer.NeighborhoodSelector(s, Enumerable.Empty<int>()),
                 initialTemp: 1000,
                 finalTemp: 999,

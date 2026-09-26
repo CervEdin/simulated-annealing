@@ -91,8 +91,11 @@ namespace cli
             double? bestKnownCost
         )
         {
-            Func<IEnumerable<int>, double> evaluate = x => evaluator.Evaluate(x.ToArray()).Penalized(Lambda);
-            Func<IEnumerable<int>, bool> isFeasible = x => evaluator.Evaluate(x.ToArray()).Feasible;
+            Func<IEnumerable<int>, (double, double)> evaluate = x =>
+            {
+                Evaluation evaluation = evaluator.Evaluate(x as IReadOnlyList<int> ?? x.ToArray());
+                return (evaluation.Distance, evaluation.Violation);
+            };
             // The end depots are always followed by the next vehicle's start depot
             Func<IEnumerable<int>, IList<int?>> neighborOperator =
                 e => Explorer.NeighborhoodSelector(e, reindexer.EndDepotIndexes);
@@ -106,7 +109,7 @@ namespace cli
                 tempReduction: ReductionFunction.geometric,
                 iterationPerTemp: 10000,
                 alpha: 0.95,
-                isFeasible: isFeasible);
+                penalty: Lambda);
             Stopwatch stopwatch = Stopwatch.StartNew();
             var solution = solver.Run();
             Report($"annealed from {start} in {stopwatch.Elapsed.TotalSeconds:F1}s", solution, evaluator,

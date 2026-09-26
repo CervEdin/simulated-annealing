@@ -5,4 +5,8 @@
         <RootNamespace>algorithm</RootNamespace>
     </PropertyGroup>
 
+    <ItemGroup>
+        <InternalsVisibleTo Include="tests"/>
+    </ItemGroup>
+
 </Project>

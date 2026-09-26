@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using algorithm.constraint;
 
@@ -14,12 +15,12 @@ namespace algorithm.solver
 
     public class SimulatedAnnealing
     {
-        private readonly int _alpha;
-        private readonly int _beta;
+        private readonly double _alpha;
+        private readonly double _beta;
 
         private readonly Action _decrementRule;
         private readonly Func<IEnumerable<int>, double> _evaluate;
-        private readonly int _finalTemp;
+        private readonly double _finalTemp;
         private readonly int _iterationPerTemp;
 
         private readonly Func<
@@ -27,100 +28,125 @@ namespace algorithm.solver
             IList<int?>
         > _neighborhoodSelector;
 
-        private readonly Random _random = new(1);
+        private readonly Random _random;
         private int[] _bestSuccessors;
-        private int _currTemp;
+        private double _bestCost;
+        private double _currTemp;
 
         private int[] _successors;
-        private readonly int[] _predecessors;
+        private double _cost;
+        private int[] _predecessors;
 
+        /// <param name="initialSolution"></param>
+        /// <param name="solutionEvaluator">The cost of a solution given as successors</param>
+        /// <param name="neighborhoodSelector">The successors that may change, null for fixed ones</param>
+        /// <param name="initialTemp"></param>
+        /// <param name="finalTemp">Must be positive</param>
+        /// <param name="tempReduction"></param>
+        /// <param name="iterationPerTemp"></param>
+        /// <param name="alpha">linear: the step (&gt; 0), geometric: the factor (between 0 and 1)</param>
+        /// <param name="beta">slowDecrease: T = T / (1 + beta * T) (&gt; 0)</param>
+        /// <param name="seed">Seed for the random number generator</param>
         public SimulatedAnnealing(
             Circuit initialSolution,
             Func<IEnumerable<int>, double> solutionEvaluator,
             Func<IEnumerable<int>, IList<int?>> neighborhoodSelector,
-            int initialTemp = 10,
-            int finalTemp = 1,
-            ReductionFunction tempReduction = ReductionFunction.linear,
+            double initialTemp = 10,
+            double finalTemp = 1,
+            ReductionFunction tempReduction = ReductionFunction.geometric,
             int iterationPerTemp = 100,
-            int alpha = 10,
-            int beta = 5
+            double alpha = 0.9,
+            double beta = 0.01,
+            int seed = 1
         )
         {
-            _bestSuccessors = initialSolution.Successors.ToArray();
+            if (finalTemp <= 0)
+                throw new ArgumentOutOfRangeException(nameof(finalTemp));
+            if (iterationPerTemp < 1)
+                throw new ArgumentOutOfRangeException(nameof(iterationPerTemp));
+
             _successors = initialSolution.Successors.ToArray();
-            _predecessors = initialSolution.Successors.Predecessors().ToArray();
+            _predecessors = _successors.Predecessors();
             _evaluate = solutionEvaluator;
+            _cost = _evaluate(_successors);
+            _bestSuccessors = _successors;
+            _bestCost = _cost;
             _currTemp = initialTemp;
             _finalTemp = finalTemp;
             _iterationPerTemp = iterationPerTemp;
             _alpha = alpha;
             _beta = beta;
             _neighborhoodSelector = neighborhoodSelector;
+            _random = new Random(seed);
 
             _decrementRule = tempReduction switch
             {
-                ReductionFunction.linear => LinearTempReduction,
-                ReductionFunction.geometric => GeometricTempReduction,
-                ReductionFunction.slowDecrease => SlowDecreaseTempReduction,
-                _ => throw new ArgumentOutOfRangeException()
+                ReductionFunction.linear when alpha > 0 => LinearTempReduction,
+                ReductionFunction.geometric when alpha is > 0 and < 1 => GeometricTempReduction,
+                ReductionFunction.slowDecrease when beta > 0 => SlowDecreaseTempReduction,
+                ReductionFunction.linear or ReductionFunction.geometric =>
+                    throw new ArgumentOutOfRangeException(nameof(alpha)),
+                ReductionFunction.slowDecrease => throw new ArgumentOutOfRangeException(nameof(beta)),
+                _ => throw new ArgumentOutOfRangeException(nameof(tempReduction))
             };
         }
 
         private void LinearTempReduction() => _currTemp -= _alpha;
 
-        private void GeometricTempReduction() => _currTemp *= 1 / _alpha;
+        private void GeometricTempReduction() => _currTemp *= _alpha;
 
         private void SlowDecreaseTempReduction() => _currTemp /= 1 + _beta * _currTemp;
 
-        private bool IsTerminationCriteriaMet() =>
-            _currTemp <= _finalTemp
-            || !_neighborhoodSelector(_successors).Any();
+        public double BestCost => _bestCost;
 
         public Circuit Run()
         {
-            while (!IsTerminationCriteriaMet())
-                // iterate that number of times
-                foreach (int _ in Enumerable.Range(0, _iterationPerTemp))
-                {
-                    // get neighbors (all successors)
-                    var neighborhood = _neighborhoodSelector(_successors);
-
-                    //logging.debug(f's-neighbors: {neighbors}')
-                    var moves = Explorer.Mover(
-                        neighborhood,
-                        _predecessors,
-                        _random).ToArray();
-
-                    int[] candidateSolution = _successors
-                        .Select((s, i) =>
-                            (i, s, new_s: moves.SingleOrDefault(tp => tp.i == i).s)
-                        )
-                        .Select(tp => tp.i != tp.new_s ? tp.new_s : tp.s)
-                        .ToArray();
-                    if (!Circuit.Valid(candidateSolution))
-                        throw new ArgumentOutOfRangeException();
-                    //logging.debug(f's-new-sol: {newSolution}')
-                    // get the cost between the two solutions
-                    double cost = _evaluate(_successors) - _evaluate(candidateSolution);
-                    // if the new solution is better, accept it
-                    if (cost >= 0)
-                    {
-                        _successors = candidateSolution;
-                        _bestSuccessors = candidateSolution;
-                    }
-                    // if the new solution is not better, accept it with a probability of e^(-cost/temp)
-                    else if (_random.NextDouble() < Math.Exp(-cost / _currTemp))
-                    {
-                        _successors = candidateSolution;
-                    }
-
-                    // decrement the temperature
-                    _decrementRule();
-                }
+            while (_currTemp > _finalTemp)
+            {
+                for (int i = 0; i < _iterationPerTemp; i++)
+                    if (!Step())
+                        return new Circuit(_bestSuccessors);
+                _decrementRule();
+            }
 
             return new Circuit(_bestSuccessors);
         }
 
-        //logging.info(f'stopping solver')
+        /// <summary>
+        /// Try one move from the neighborhood of the current solution
+        /// </summary>
+        /// <returns>false if there are no moves left</returns>
+        private bool Step()
+        {
+            var moves = Explorer.Mover(
+                _neighborhoodSelector(_successors),
+                _predecessors,
+                _random);
+            if (moves.Count == 0)
+                return false;
+
+            int[] candidateSolution = _successors.ToArray();
+            foreach ((int i, int s) in moves)
+                candidateSolution[i] = s;
+            Debug.Assert(Circuit.Valid(candidateSolution));
+
+            double candidateCost = _evaluate(candidateSolution);
+            double delta = candidateCost - _cost;
+            // Metropolis criterion: always accept an improvement,
+            // accept a worse solution with a probability of e^(-delta/temp)
+            if (delta > 0 && _random.NextDouble() >= Math.Exp(-delta / _currTemp))
+                return true;
+
+            _successors = candidateSolution;
+            _cost = candidateCost;
+            _predecessors = _successors.Predecessors();
+            if (_cost < _bestCost)
+            {
+                _bestSuccessors = _successors;
+                _bestCost = _cost;
+            }
+
+            return true;
+        }
     }
 }

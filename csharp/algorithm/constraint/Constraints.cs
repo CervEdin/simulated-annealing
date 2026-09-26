@@ -12,20 +12,34 @@ namespace algorithm.constraint
         /// <param name="ints"></param>
         /// <returns></returns>
         public static bool AllDifferent(
-            this ICollection<int> ints
+            this IReadOnlyCollection<int> ints
         ) => ints.Count == ints.ToHashSet().Count;
 
         /// <summary>
         /// The Circuit constraint is true IFF
-        /// the list represents a hamiltonian circuit.
+        /// the list represents a hamiltonian circuit,
+        /// where ints[i] is the successor of node i.
         /// (implies AllDifferent)
         /// </summary>
         /// <param name="ints"></param>
         /// <returns></returns>
         public static bool Circuit(
-            this ICollection<int> ints
-        ) => ints
-            .Select((x, i) => (x, i))
-            .All(tp => tp.x != tp.i);
+            this IReadOnlyList<int> ints
+        )
+        {
+            if (ints.Count == 0 || ints.Any(x => x < 0 || x >= ints.Count))
+                return false;
+            // Follow the successors from 0, a hamiltonian circuit only
+            // returns to 0 after visiting every other node exactly once
+            int current = 0;
+            for (int visited = 1; visited < ints.Count; visited++)
+            {
+                current = ints[current];
+                if (current == 0)
+                    return false;
+            }
+
+            return ints[current] == 0;
+        }
     }
 }

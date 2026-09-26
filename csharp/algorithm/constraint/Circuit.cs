@@ -4,49 +4,44 @@ using System.Linq;
 
 namespace algorithm.constraint
 {
+    /// <summary>
+    /// A hamiltonian circuit represented by successors,
+    /// Successors[i] is the node visited after node i.
+    /// </summary>
     public class Circuit
     {
-        public readonly int[] Successors;
+        public IReadOnlyList<int> Successors { get; }
 
         public Circuit(IEnumerable<int> successors)
         {
             int[] ss = successors.ToArray();
             if (!Valid(ss))
                 throw new ArgumentOutOfRangeException(nameof(successors));
-            Successors = ss.ToArray();
+            Successors = Array.AsReadOnly(ss);
         }
 
-        public static bool Valid(IList<int> circuit)
-            => circuit.Circuit()
-               // TODO: Needed? Circuit implies AllDifferent
-               && circuit.AllDifferent();
+        public static bool Valid(IReadOnlyList<int> circuit) => circuit.Circuit();
 
-        // TODO: test
+        /// <summary>
+        /// The order the circuit visits the nodes in, starting from node 0
+        /// </summary>
         public Route ToRoute()
         {
-            int[] rr = new int[Successors.Length];
-
-            int i = 0;
-            int current = i;
-            int successor = Successors[current];
-            while (i < rr.Length)
-            {
+            int[] rr = new int[Successors.Count];
+            for (int i = 0, current = 0; i < rr.Length; i++, current = Successors[current])
                 rr[i] = current;
-                current = successor;
-                successor = Successors[current];
-                i++;
-            }
-
             return new Route(rr);
         }
-
-        public static bool Valid(int[] circuit) => circuit.AllDifferent() && circuit.Circuit();
     }
 
     public static class CircuitHelper
     {
-        internal static IEnumerable<int> Predecessors(this IList<int> successors)
-            => successors
-                .Select((succ, current) => successors.IndexOf(current));
+        internal static int[] Predecessors(this IReadOnlyList<int> successors)
+        {
+            int[] predecessors = new int[successors.Count];
+            for (int current = 0; current < successors.Count; current++)
+                predecessors[successors[current]] = current;
+            return predecessors;
+        }
     }
 }

@@ -46,8 +46,8 @@ namespace algorithm.solver
             int beta = 5
         )
         {
-            _bestSuccessors = initialSolution.Successors;
-            _successors = initialSolution.Successors;
+            _bestSuccessors = initialSolution.Successors.ToArray();
+            _successors = initialSolution.Successors.ToArray();
             _predecessors = initialSolution.Successors.Predecessors().ToArray();
             _evaluate = solutionEvaluator;
             _currTemp = initialTemp;
@@ -97,7 +97,7 @@ namespace algorithm.solver
                         )
                         .Select(tp => tp.i != tp.new_s ? tp.new_s : tp.s)
                         .ToArray();
-                    if (!Circuit.Valid(candidateSolution) || !new Circuit(candidateSolution).ToRoute().Valid())
+                    if (!Circuit.Valid(candidateSolution))
                         throw new ArgumentOutOfRangeException();
                     //logging.debug(f's-new-sol: {newSolution}')
                     // get the cost between the two solutions

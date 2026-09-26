@@ -132,7 +132,7 @@ namespace algorithm.solver
                 .ToList();
 
         public static double CostObjective(
-            ICollection<int> route,
+            IEnumerable<int> route,
             IList<IList<double>> m
         ) =>
             route

@@ -271,7 +271,7 @@ public class SimulatedAnnealing
 {
     public SimulatedAnnealing(
         Circuit initialSolution,
-        Func<IEnumerable<int>, double> solutionEvaluator,
+        Func<IEnumerable<int>, (double cost, double violation)> solutionEvaluator,  // violation 0: feasible
         Func<IEnumerable<int>, IList<int?>> neighborhoodSelector,
         double initialTemp = 10,
         double finalTemp = 1,           // must be > 0
@@ -280,11 +280,19 @@ public class SimulatedAnnealing
         double alpha = 0.9,
         double beta = 0.01,
         int seed = 1,
-        Func<IEnumerable<int>, bool> isFeasible = null)  // null: every solution is feasible
+        double penalty = 1,             // per unit of violation, must be > 0
+        PenaltyUpdate penaltyUpdate = PenaltyUpdate.constant)
 
-    public Circuit Run()        // Main optimization loop, returns the best (feasible) solution
-    public double BestCost { get; }
-    public bool FoundFeasible { get; }  // whether the best solution is feasible
+    public Circuit Run()        // Main optimization loop, returns the best solution
+    public double BestCost { get; }     // its cost, without the penalty
+    public bool FoundFeasible { get; }  // whether it is feasible, if not it is the least violating
+    public double Penalty { get; }      // the current penalty
+}
+
+public enum PenaltyUpdate
+{
+    constant,       // keep the penalty
+    cooling         // penalty = initial penalty * initialTemp / T, tightens as the search cools
 }
 
 public enum ReductionFunction
@@ -297,14 +305,19 @@ public enum ReductionFunction
 
 Invalid parameters throw `ArgumentOutOfRangeException`, so the schedule always terminates.
 
+Constraints are hard: a solution that violates them may be visited on the way, but it is only
+returned if no feasible solution was found, and then `FoundFeasible` is false. That is a result,
+not an error.
+
 **Algorithm Flow**:
 1. Start with the initial solution, its cost and the initial temperature
 2. While the temperature is above the final temperature, `iterationPerTemp` times:
    - Generate a candidate with `Explorer.Mover` from the neighborhood selector's view
-   - Accept it if `delta = candidate - current <= 0`, else with probability `e^(-delta/T)`
-   - Track the best solution by comparing against the best cost: only a feasible solution
-     (`isFeasible`) can replace a feasible best, until one is found the best is the lowest cost
-3. Reduce the temperature once per level
+   - Accept it if `delta <= 0`, else with probability `e^(-delta/T)`, where `delta` is the change
+     of the cost plus the penalty times the violation
+   - Track the best solution: the least violating, then the cheapest, so once one is feasible it is
+     the cheapest feasible solution
+3. Reduce the temperature once per level, and with `PenaltyUpdate.cooling` raise the penalty
 4. Stop early if there are no possible moves
 
 ### 2. Neighborhood Exploration
@@ -390,8 +403,8 @@ public static class Constraints
 **VrptwEvaluator** (`csharp/transform/Evaluator.cs`), constructed from the customers, capacity and
 `Reindexer`:
 - `Evaluate(successors)`: walks the circuit from depot 0 and returns an
-  `Evaluation(Distance, Overload, Lateness)` with `Feasible` and `Penalized(lambda)`
-  (distance + lambda * (overload + lateness))
+  `Evaluation(Distance, Overload, Lateness)` with `Feasible`, `Violation` (overload + lateness)
+  and `Penalized(lambda)` (distance + lambda * violation)
 - Each vehicle starts at depot `2v` at the depot's `Earliest` with no load. Travel time is the
   unrounded Euclidean distance, a vehicle arriving early waits until `Earliest`, the time after
   `Latest` (the end depot's included) is lateness and the load above the capacity at the end depot
@@ -489,7 +502,9 @@ The `csharp/tests` xUnit project covers:
   every reduction function, keeps the best solution, stops without moves, is reproducible by
   seed and rejects schedules that never end
 - `algorithm/SimulatedAnnealingTests.cs` also checks that the best feasible solution is kept,
-  reached from an infeasible start, and that `FoundFeasible` is false when nothing is feasible
+  reached from an infeasible start and beats a cheaper infeasible one, that without feasible
+  solutions the least violating is returned with `FoundFeasible` false, that the penalty steers
+  the search and that cooling raises it
 - `transform/HelperTests.cs`: Reindexer, ToCircuit, ToMatrix
 - `transform/EvaluatorTests.cs`: the best known C101 solution is feasible (828.94, 10 vehicles),
   exact overload and lateness, waiting, returning late, empty routes
@@ -566,27 +581,31 @@ The CLI anneals from the best known solution when `solomon-vrptw-benchmarks/resu
 
 ### Adjusting SA Parameters
 
-In `csharp/cli/Program.cs`, modify `Lambda` (the penalty per unit of overload and lateness) and
-the `SimulatedAnnealing` constructor in `Solve`:
+In `csharp/cli/Program.cs`, modify `Lambda` (the initial penalty per unit of overload and lateness)
+and the `SimulatedAnnealing` constructor in `Solve`:
 
 ```csharp
 SimulatedAnnealing solver = new(
     initial,
-    evaluate,                    // the penalized cost
+    evaluate,                    // the distance and the violation
     neighborOperator,
     initialTemp: 10,             // Increase for more exploration, relative to the move deltas
     finalTemp: 0.1,              // Decrease for more exploitation, must be > 0
     tempReduction: ReductionFunction.geometric,  // Try linear, slowDecrease
     iterationPerTemp: 10000,     // Increase for more thorough search
     alpha: 0.95,                 // Geometric factor, closer to 1 cools slower
-    isFeasible: isFeasible);     // the best solution is the best feasible one
+    penalty: Lambda,             // 10
+    penaltyUpdate: PenaltyUpdate.cooling);  // the penalty ends at about 1000
 ```
 
-Tuned with `Lambda = 100` on C101, R101 and RC101 (seeds 1-3): from the construction C101
-reaches the best known 828.94, R101 ends 3-5% and RC101 1-4% above theirs, in about 6.5s per run
-(Release). A higher initial temperature wanders too far to return to a better feasible solution.
-The best known results minimize the number of vehicles first, so a distance-only run can also end
-below them.
+From the construction, in about 6.5s per run (Release), over seeds 1-10: C101 reaches the best
+known 828.94 in 8 of 10 runs (else 880.48), R101 ends 4.2% and RC101 1.2% above theirs on average.
+A higher initial temperature wanders too far to return to a better feasible solution. A constant
+penalty of 100 does about as well (better on C101, even on R101, worse on RC101 and 4 of 5 other
+instances) but occasionally ends the search infeasible, an adaptive penalty finds slightly better distances on
+R101/RC101 but loosens instead of tightening. The best known results minimize the number of
+vehicles first, so a distance-only run can also end below them. When no feasible solution is found
+the CLI says so and reports the least violating one.
 
 ## Known TODOs & Areas for Improvement
 
@@ -597,10 +616,11 @@ below them.
 2. **CI/CD**
    - No GitHub Actions or CI configuration
 3. **Performance**
-   - Each iteration copies the successors and evaluates the whole candidate (O(n)), twice when
-     its feasibility is checked; only the two routes the relocate move touches need re-walking
+   - Each iteration copies the successors and evaluates the whole candidate (O(n)); only the two
+     routes the relocate move touches need re-walking
 4. **Search**
-   - A fixed `Lambda`, an adaptive penalty could help the harder R and RC instances
+   - The penalty only cools; balancing it adaptively found better distances but loosens the
+     constraints, a combination might keep both
    - Only the relocate move, 2-opt* or swap moves could help
    - The vehicle count, which the Solomon rankings minimize first, isn't an objective
 

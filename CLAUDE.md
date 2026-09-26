@@ -15,8 +15,10 @@ This repository contains a **C# implementation of a Simulated Annealing metaheur
    - Neighborhood exploration via 3-edge exchange moves
    - Initial/final temperature and iteration counts
 4. **Validates solutions** using constraint programming concepts (AllDifferent, Circuit)
-5. **Computes costs** using Euclidean distance matrices
+5. **Computes costs** using Euclidean distance matrices, penalizing overload and lateness,
+   and reports the best feasible solution (capacity and time windows respected)
 6. **Handles multi-vehicle routing** via depot replication and reindexing
+7. **Constructs an initial solution** with a nearest feasible neighbor heuristic
 
 ## Repository Structure
 
@@ -53,12 +55,14 @@ This repository contains a **C# implementation of a Simulated Annealing metaheur
     │
     ├── transform/                # Data transformation utilities
     │   ├── transform.csproj
-    │   └── Helper.cs             # Distance matrix, reindexing
+    │   ├── Helper.cs             # Distance matrix, reindexing
+    │   ├── Evaluator.cs          # VRPTW distance, overload and lateness of a circuit
+    │   └── Construction.cs       # Nearest feasible neighbor initial routes
     │
     └── tests/                    # xUnit tests
         ├── tests.csproj
         ├── algorithm/            # Constraints, representations, Explorer, SA
-        ├── transform/            # Reindexer and helpers
+        ├── transform/            # Reindexer, helpers, evaluator and construction
         └── cli/                  # Loading C101 and its best known cost
 ```
 
@@ -115,6 +119,9 @@ dotnet test
 
 # Run the CLI
 dotnet run --project cli
+
+# Run the CLI on another instance, e.g. R101
+dotnet run --project cli -- r 1 01
 ```
 
 ### Solution Configuration
@@ -272,10 +279,12 @@ public class SimulatedAnnealing
         int iterationPerTemp = 100,
         double alpha = 0.9,
         double beta = 0.01,
-        int seed = 1)
+        int seed = 1,
+        Func<IEnumerable<int>, bool> isFeasible = null)  // null: every solution is feasible
 
-    public Circuit Run()        // Main optimization loop, returns the best solution
+    public Circuit Run()        // Main optimization loop, returns the best (feasible) solution
     public double BestCost { get; }
+    public bool FoundFeasible { get; }  // whether the best solution is feasible
 }
 
 public enum ReductionFunction
@@ -293,7 +302,8 @@ Invalid parameters throw `ArgumentOutOfRangeException`, so the schedule always t
 2. While the temperature is above the final temperature, `iterationPerTemp` times:
    - Generate a candidate with `Explorer.Mover` from the neighborhood selector's view
    - Accept it if `delta = candidate - current <= 0`, else with probability `e^(-delta/T)`
-   - Track the best solution by comparing against the best cost
+   - Track the best solution by comparing against the best cost: only a feasible solution
+     (`isFeasible`) can replace a feasible best, until one is found the best is the lowest cost
 3. Reduce the temperature once per level
 4. Stop early if there are no possible moves
 
@@ -376,6 +386,23 @@ public static class Constraints
 - `ToMatrix()`: Converts customer coordinates to Euclidean distance matrix (customers looked up by `Id`)
 - `ToCircuit()`: Converts multi-route solution to single circuit
 - `Distance()`: Euclidean distance calculation
+
+**VrptwEvaluator** (`csharp/transform/Evaluator.cs`), constructed from the customers, capacity and
+`Reindexer`:
+- `Evaluate(successors)`: walks the circuit from depot 0 and returns an
+  `Evaluation(Distance, Overload, Lateness)` with `Feasible` and `Penalized(lambda)`
+  (distance + lambda * (overload + lateness))
+- Each vehicle starts at depot `2v` at the depot's `Earliest` with no load. Travel time is the
+  unrounded Euclidean distance, a vehicle arriving early waits until `Earliest`, the time after
+  `Latest` (the end depot's included) is lateness and the load above the capacity at the end depot
+  `2v+1` is overload. `Customer.Cost` is the service time
+- `VehiclesUsed(successors)`: the number of non-empty routes
+
+**Construction** (`csharp/transform/Construction.cs`):
+- `NearestNeighbor(customers, capacity, nVehicles)`: routes of customer ids for `ToCircuit`, one
+  vehicle at a time visiting the customer whose service can start first that keeps the load, its
+  window and the return to the depot feasible. Customers left after the last vehicle are appended
+  to its route (infeasible, for the solver to repair)
 
 ### 6. Data Models
 
@@ -461,7 +488,13 @@ The `csharp/tests` xUnit project covers:
 - `algorithm/SimulatedAnnealingTests.cs`: finds the optimal circuit of points on a circle with
   every reduction function, keeps the best solution, stops without moves, is reproducible by
   seed and rejects schedules that never end
+- `algorithm/SimulatedAnnealingTests.cs` also checks that the best feasible solution is kept,
+  reached from an infeasible start, and that `FoundFeasible` is false when nothing is feasible
 - `transform/HelperTests.cs`: Reindexer, ToCircuit, ToMatrix
+- `transform/EvaluatorTests.cs`: the best known C101 solution is feasible (828.94, 10 vehicles),
+  exact overload and lateness, waiting, returning late, empty routes
+- `transform/ConstructionTests.cs`: C101 is routed feasibly in the Reindexer layout, the nearest
+  choice counts waiting, returning for capacity, windows and the depot's `Latest`
 - `cli/LoaderTests.cs`: loads C101 and checks the best known cost of 828.94
 
 `algorithm` exposes its internals to `tests` (`InternalsVisibleTo`) so `Explorer.Mover` can be tested.
@@ -474,7 +507,7 @@ dotnet test
 ### Inline Validation
 
 `csharp/cli/Program.cs` also runs a few `Debug.Assert` checks of the Circuit/Route conversion and the
-C101 best known cost at startup, and `SimulatedAnnealing` asserts each candidate is a valid circuit.
+C101 best known cost at startup (only for C101), and `SimulatedAnnealing` asserts each candidate is a valid circuit.
 Run in Debug mode to enable them.
 
 ## Common Development Tasks
@@ -521,50 +554,55 @@ Edit `csharp/algorithm/solver/Explorer.cs`:
 
 ### Loading Different Benchmark Instances
 
-In `csharp/cli/Program.cs`, modify `Loader` initialization:
+Pass the type, version and number to the CLI, C101 by default:
 
-```csharp
-// Current: C101
-Loader ld = new("c", "1", "01");
-
-// For R205:
-Loader ld = new("r", "2", "05");
-
-// For RC108:
-Loader ld = new("rc", "1", "08");
+```bash
+dotnet run --project cli -- r 2 05    # R205
+dotnet run --project cli -- rc 1 08   # RC108
 ```
+
+The CLI anneals from the best known solution when `solomon-vrptw-benchmarks/results` has one
+(7 of the 56 instances don't, e.g. R103), and from the nearest neighbor construction.
 
 ### Adjusting SA Parameters
 
-In `csharp/cli/Program.cs`, modify the `SimulatedAnnealing` constructor:
+In `csharp/cli/Program.cs`, modify `Lambda` (the penalty per unit of overload and lateness) and
+the `SimulatedAnnealing` constructor in `Solve`:
 
 ```csharp
 SimulatedAnnealing solver = new(
     initial,
-    evaluator,
+    evaluate,                    // the penalized cost
     neighborOperator,
-    initialTemp: 100,            // Increase for more exploration, relative to the move deltas
+    initialTemp: 10,             // Increase for more exploration, relative to the move deltas
     finalTemp: 0.1,              // Decrease for more exploitation, must be > 0
     tempReduction: ReductionFunction.geometric,  // Try linear, slowDecrease
-    iterationPerTemp: 1000,      // Increase for more thorough search
-    alpha: 0.95);                // Geometric factor, closer to 1 cools slower
+    iterationPerTemp: 10000,     // Increase for more thorough search
+    alpha: 0.95,                 // Geometric factor, closer to 1 cools slower
+    isFeasible: isFeasible);     // the best solution is the best feasible one
 ```
+
+Tuned with `Lambda = 100` on C101, R101 and RC101 (seeds 1-3): from the construction C101
+reaches the best known 828.94, R101 ends 3-5% and RC101 1-4% above theirs, in about 6.5s per run
+(Release). A higher initial temperature wanders too far to return to a better feasible solution.
+The best known results minimize the number of vehicles first, so a distance-only run can also end
+below them.
 
 ## Known TODOs & Areas for Improvement
 
 ### Areas Needing Enhancement
 
-1. **Capacity and Time Window Constraints**
-   - Instance has `Capacity`, customers have `Demand` and `Earliest`/`Latest` time windows
-   - Not enforced by the solver, which only minimizes distance, so its cost is lower than and
-     not comparable to the best known solutions
-2. **Documentation**
+1. **Documentation**
    - No README.md in root directory
-3. **CI/CD**
+2. **CI/CD**
    - No GitHub Actions or CI configuration
-4. **Performance**
-   - Each iteration copies the successors and evaluates the full candidate cost (O(n));
-     the relocate move's delta could be computed from its 6 edges in O(1)
+3. **Performance**
+   - Each iteration copies the successors and evaluates the whole candidate (O(n)), twice when
+     its feasibility is checked; only the two routes the relocate move touches need re-walking
+4. **Search**
+   - A fixed `Lambda`, an adaptive penalty could help the harder R and RC instances
+   - Only the relocate move, 2-opt* or swap moves could help
+   - The vehicle count, which the Solomon rankings minimize first, isn't an objective
 
 ## Working with This Codebase
 
@@ -624,6 +662,8 @@ SimulatedAnnealing solver = new(
 
 ### Utilities
 - Transformations: `csharp/transform/Helper.cs`
+- VRPTW evaluation: `csharp/transform/Evaluator.cs`
+- Initial solution: `csharp/transform/Construction.cs`
 - Benchmark Loader: `csharp/cli/Loader.cs`
 
 ### Configuration

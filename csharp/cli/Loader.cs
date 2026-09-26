@@ -7,7 +7,9 @@ namespace cli
 {
     public class Loader
     {
-        private const string Benchmarks = "solomon-vrptw-benchmarks";
+        // The benchmarks are copied next to the executable, see cli.csproj
+        private static readonly string Benchmarks =
+            Path.Combine(AppContext.BaseDirectory, "solomon-vrptw-benchmarks");
 
         private static readonly JsonSerializerOptions Options = new()
         {
@@ -34,8 +36,8 @@ namespace cli
 
         public Instance Instance()
         {
-            string? path = $"{Benchmarks}/{_type}/{_version}/{Name}.json";
-            string? json = File.ReadAllText(path);
+            string path = Path.Combine(Benchmarks, _type, _version, $"{Name}.json");
+            string json = File.ReadAllText(path);
             Instance instance = JsonSerializer.Deserialize<Instance>(json, Options)
                                 ?? throw new InvalidOperationException();
             return instance;
@@ -43,8 +45,8 @@ namespace cli
 
         public Result Result()
         {
-            string? path = $"{Benchmarks}/results/{Name}.json";
-            string? json = File.ReadAllText(path);
+            string path = Path.Combine(Benchmarks, "results", $"{Name}.json");
+            string json = File.ReadAllText(path);
             Result result = JsonSerializer.Deserialize<Result>(json, Options) ?? throw new InvalidOperationException();
             return result;
         }

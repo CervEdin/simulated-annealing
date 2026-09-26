@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using System.Text.Json;
 using algorithm.constraint;
 using algorithm.solver;
 using data_layer;
@@ -12,21 +11,10 @@ namespace cli
 {
     internal static class Program
     {
-        public static JsonSerializerOptions Options = new()
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        };
-
         private static void Test(Circuit circuit, Route route)
         {
-            Debug.Assert(
-                circuit.ToRoute().List
-                    .Zip(route.List)
-                    .All(tp => tp.First == tp.Second));
-            Debug.Assert(
-                route.ToCircuit().Successors
-                    .Zip(circuit.Successors)
-                    .All(tp => tp.First == tp.Second));
+            Debug.Assert(circuit.ToRoute().List.SequenceEqual(route.List));
+            Debug.Assert(route.ToCircuit().Successors.SequenceEqual(circuit.Successors));
         }
 
         private static void Test()
@@ -62,17 +50,28 @@ namespace cli
             // ReSharper disable once CoVariantArrayConversion
             IList<IList<double>> matrix = instance.Customers.ToMatrix(reindexer);
             double optimalCost = optimalCircuit.CostObjective(matrix);
-            Debug.Assert(Math.Abs(828.94 - optimalCost) > 0.01);
+            Debug.Assert(Math.Abs(828.94 - optimalCost) < 0.01);
             Circuit initial = optimalCircuit;
 
             Func<IEnumerable<int>, double> evaluator = x => new Circuit(x).CostObjective(matrix);
+            // The end depots are always followed by the next vehicle's start depot
             Func<IEnumerable<int>, IList<int?>> neighborOperator =
-                e => Explorer.NeighborhoodSelector(e, reindexer.DepotIndexes);
+                e => Explorer.NeighborhoodSelector(e, reindexer.EndDepotIndexes);
 
-            SimulatedAnnealing solver = new(initial, evaluator, neighborOperator);
+            SimulatedAnnealing solver = new(
+                initial,
+                evaluator,
+                neighborOperator,
+                initialTemp: 100,
+                finalTemp: 0.1,
+                tempReduction: ReductionFunction.geometric,
+                iterationPerTemp: 1000,
+                alpha: 0.95);
             var solution = solver.Run();
             double cost = solution.CostObjective(matrix);
-            Console.WriteLine($"found solution cost:\t{cost}");
+            Console.WriteLine($"best known solution cost:\t{optimalCost:F2}");
+            // Capacity and time windows are not enforced yet, so this is not comparable to the best known
+            Console.WriteLine($"found solution cost:\t{cost:F2}");
         }
     }
 }

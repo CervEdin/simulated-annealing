@@ -8,7 +8,7 @@ namespace transform
 {
     public static class Helper
     {
-        private static double Distance(
+        internal static double Distance(
             (int x, int y) p1,
             (int x, int y) p2
         ) => Math.Sqrt(Math.Pow(p1.x - p2.x, 2) + Math.Pow(p1.y - p2.y, 2));

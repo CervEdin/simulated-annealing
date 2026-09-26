@@ -8,6 +8,7 @@ namespace data_layer
         [JsonPropertyName("instance")]
         public string Name { get; set; }
 
+        [JsonPropertyName("vehicle-nr")]
         public int nVehicles { get; set; }
 
         public int Capacity { get; set; }

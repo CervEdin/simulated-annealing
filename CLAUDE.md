@@ -36,7 +36,7 @@ This repository contains a **C# implementation of a Simulated Annealing metaheur
     │   └── Loader.cs             # Loads benchmark instances and results from JSON
     │
     ├── data_layer/               # Domain models
-    │   ├── data_layer.csproj     # Depends: Newtonsoft.Json 13.0.1
+    │   ├── data_layer.csproj
     │   ├── Instance.cs           # VRPTW problem instance model
     │   ├── Customer.cs           # Customer with coordinates, demand, time windows
     │   └── Result.cs             # Solution result model
@@ -44,19 +44,23 @@ This repository contains a **C# implementation of a Simulated Annealing metaheur
     ├── algorithm/                # Core optimization algorithms
     │   ├── algorithm.csproj
     │   ├── solver/
-    │   │   ├── SimulatedAnnealing.cs  # Main SA algorithm (125 lines)
-    │   │   └── Explorer.cs            # Neighborhood exploration (147 lines)
+    │   │   ├── SimulatedAnnealing.cs  # Main SA algorithm
+    │   │   └── Explorer.cs            # Relocate move, neighborhood, cost
     │   └── constraint/
-    │       ├── Constraints.cs    # AllDifferent & Circuit constraints (30 lines)
-    │       ├── Circuit.cs        # Circuit representation (52 lines)
-    │       └── Route.cs          # Route representation (42 lines)
+    │       ├── Constraints.cs    # AllDifferent & Circuit constraints
+    │       ├── Circuit.cs        # Circuit representation
+    │       └── Route.cs          # Route representation
     │
-    └── transform/                # Data transformation utilities
-        ├── transform.csproj
-        └── Helper.cs             # Distance matrix, reindexing (107 lines)
+    ├── transform/                # Data transformation utilities
+    │   ├── transform.csproj
+    │   └── Helper.cs             # Distance matrix, reindexing
+    │
+    └── tests/                    # xUnit tests
+        ├── tests.csproj
+        ├── algorithm/            # Constraints, representations, Explorer, SA
+        ├── transform/            # Reindexer and helpers
+        └── cli/                  # Loading C101 and its best known cost
 ```
-
-**Total:** ~675 lines of C# code across 11 source files
 
 ### Project Dependency Graph
 
@@ -71,19 +75,22 @@ algorithm (library)
  └─→ (no external dependencies)
 
 data_layer (library)
- └─→ Newtonsoft.Json 13.0.1
+ └─→ (no external dependencies, uses System.Text.Json)
 
 transform (library)
  └─→ data_layer
+
+tests (xUnit)
+ └─→ algorithm, cli, data_layer, transform
 ```
 
 ## Technology Stack
 
-- **Language**: C# (.NET 5.0)
-- **Framework**: .NET 5.0 (`net5.0` target)
+- **Language**: C# (.NET 8.0)
+- **Framework**: .NET 8.0 (`net8.0` target)
 - **Dependencies**:
-  - Newtonsoft.Json 13.0.1 (JSON serialization)
-  - System.Text.Json (CLI JSON operations)
+  - System.Text.Json (JSON serialization)
+  - xUnit (tests)
 - **IDE**: JetBrains Rider (config in `.idea/`)
 - **Nullable Reference Types**: Enabled in CLI project
 
@@ -103,6 +110,9 @@ dotnet build
 # Build in Release mode
 dotnet build -c Release
 
+# Run the tests
+dotnet test
+
 # Run the CLI
 dotnet run --project cli
 ```
@@ -111,7 +121,8 @@ dotnet run --project cli
 
 - **Configurations**: Debug|Any CPU, Release|Any CPU
 - **Output**: CLI project produces an executable, others are class libraries
-- **Asset Copying**: `solomon-vrptw-benchmarks/**/*.json` files copied to output directory
+- **Asset Copying**: `solomon-vrptw-benchmarks/**/*.json` files copied to output directory,
+  `Loader` resolves them relative to `AppContext.BaseDirectory`
 
 ### Git Submodule Setup
 
@@ -133,6 +144,8 @@ Follow the established pattern:
 
 Examples:
   bench:            Update solomon-vrptw-benchmarks
+  transform:        Validate the Reindexer and look customers up by id
+  tests:            Add an xUnit test project
   algo/constraint:  Turn validation method into function
   algo/solver:      Move functionality into Explorer helper class
   cli:              Include the solomon benchmarks/results *.json
@@ -142,7 +155,9 @@ Examples:
   wip:              Work in progress commits
 ```
 
-**Components**: `bench`, `algo/constraint`, `algo/solver`, `cli`, `data_layer`, `conf`, `doc`, `wip`
+**Components**: `bench`, `algo/constraint`, `algo/solver`, `cli`, `data_layer`, `transform`, `tests`, `conf`, `doc`, `wip`
+
+Existing commits separate the component and description with a tab.
 
 ## Code Conventions & Style
 
@@ -159,6 +174,9 @@ indent_style = space
 max_line_length = 120
 tab_width = 4
 ```
+
+Note that the existing source files are actually LF without a BOM; match the file you are editing
+rather than converting whole files.
 
 ### C# Coding Patterns
 
@@ -206,9 +224,10 @@ return circuit.Successors
 ```csharp
 _decrementRule = tempReduction switch
 {
-    ReductionFunction.linear => LinearTempReduction,
-    ReductionFunction.geometric => GeometricTempReduction,
-    ReductionFunction.slowDecrease => SlowDecreaseTempReduction,
+    ReductionFunction.linear when alpha > 0 => LinearTempReduction,
+    ReductionFunction.geometric when alpha is > 0 and < 1 => GeometricTempReduction,
+    ReductionFunction.slowDecrease when beta > 0 => SlowDecreaseTempReduction,
+    // ... parameter validation
     _ => throw new ArgumentOutOfRangeException(nameof(tempReduction))
 };
 ```
@@ -216,8 +235,8 @@ _decrementRule = tempReduction switch
 #### 5. Tuple Deconstruction
 
 ```csharp
-(int current, int succ) = EdgePicker(successors, _random);
-var (nextSuccessors, delta) = Mover(successors, current, succ, _random);
+foreach ((int i, int s) in moves)
+    candidateSolution[i] = s;
 ```
 
 #### 6. Type Declarations
@@ -238,7 +257,7 @@ The codebase uses ReSharper/Rider with specific settings:
 
 ### 1. Simulated Annealing Algorithm
 
-**Location**: `csharp/algorithm/solver/SimulatedAnnealing.cs:125`
+**Location**: `csharp/algorithm/solver/SimulatedAnnealing.cs`
 
 ```csharp
 public class SimulatedAnnealing
@@ -247,103 +266,114 @@ public class SimulatedAnnealing
         Circuit initialSolution,
         Func<IEnumerable<int>, double> solutionEvaluator,
         Func<IEnumerable<int>, IList<int?>> neighborhoodSelector,
-        int initialTemp = 10,
-        int finalTemp = 1,
+        double initialTemp = 10,
+        double finalTemp = 1,           // must be > 0
         ReductionFunction tempReduction = ReductionFunction.geometric,
-        int iterationPerTemp = 100)
+        int iterationPerTemp = 100,
+        double alpha = 0.9,
+        double beta = 0.01,
+        int seed = 1)
 
-    public Circuit Run()  // Main optimization loop
+    public Circuit Run()        // Main optimization loop, returns the best solution
+    public double BestCost { get; }
 }
 
 public enum ReductionFunction
 {
-    linear,         // _currTemp -= _alpha
-    geometric,      // _currTemp *= 1 / _alpha
-    slowDecrease    // _currTemp /= 1 + _beta * _currTemp
+    linear,         // T -= alpha           (alpha > 0)
+    geometric,      // T *= alpha           (0 < alpha < 1)
+    slowDecrease    // T /= 1 + beta * T    (beta > 0)
 }
 ```
 
+Invalid parameters throw `ArgumentOutOfRangeException`, so the schedule always terminates.
+
 **Algorithm Flow**:
-1. Start with initial solution and temperature
-2. For each temperature level:
-   - Generate neighbors via neighborhood selector
-   - Evaluate cost delta
-   - Accept if improvement OR probabilistically if worse
-   - Track best solution found
-3. Reduce temperature according to strategy
-4. Continue until final temperature reached
+1. Start with the initial solution, its cost and the initial temperature
+2. While the temperature is above the final temperature, `iterationPerTemp` times:
+   - Generate a candidate with `Explorer.Mover` from the neighborhood selector's view
+   - Accept it if `delta = candidate - current <= 0`, else with probability `e^(-delta/T)`
+   - Track the best solution by comparing against the best cost
+3. Reduce the temperature once per level
+4. Stop early if there are no possible moves
 
 ### 2. Neighborhood Exploration
 
-**Location**: `csharp/algorithm/solver/Explorer.cs:147`
+**Location**: `csharp/algorithm/solver/Explorer.cs`
 
 Key functions:
-- `EdgePicker()`: Randomly selects an edge (current→successor) to modify
-- `Mover()`: Generates neighborhood via 3-edge exchange
-- `NeighborhoodSelector()`: Filters depot nodes from modification
-- `CostObjective()`: Calculates total route cost from distance matrix
+- `Mover()`: Relocates a uniformly random node `b` from `a -> b -> c` to between `x -> y`,
+  the 3-edge exchange `a->b, b->c, x->y` => `a->c, x->b, b->y`. Returns the changed successors,
+  always a valid circuit, and never changes a successor that is `null` in the neighborhood.
+- `NeighborhoodSelector()`: Sets the successors of the given (fixed) indexes to `null`.
+  The CLI fixes `Reindexer.EndDepotIndexes`, since an end depot is always followed by the next
+  vehicle's start depot.
+- `CostObjective()`: Sum of `m[i][successor[i]]` for a circuit, or of consecutive pairs for a route
 
 ### 3. Solution Representations
 
-Two equivalent representations with bidirectional conversion:
+Two equivalent representations with bidirectional conversion. Both validate in the constructor,
+copy their input and expose it read-only.
 
 #### Circuit Representation
 
-**Location**: `csharp/algorithm/constraint/Circuit.cs:52`
+**Location**: `csharp/algorithm/constraint/Circuit.cs`
 
 ```csharp
 public class Circuit
 {
-    public IList<int?> Successors { get; }  // successors[i] = next node after i
+    public IReadOnlyList<int> Successors { get; }  // Successors[i] = next node after i
 
-    // Validates Hamiltonian circuit constraint
-    // Converts to Route via ToRoute()
+    public static bool Valid(IReadOnlyList<int> circuit)  // a single hamiltonian circuit
+    public Route ToRoute()                                // visit order starting from node 0
 }
 ```
 
 #### Route Representation
 
-**Location**: `csharp/algorithm/constraint/Route.cs:42`
+**Location**: `csharp/algorithm/constraint/Route.cs`
 
 ```csharp
 public class Route
 {
-    public IList<int> List { get; }  // Ordered sequence of visits
+    public IReadOnlyList<int> List { get; }  // Ordered sequence of visits
 
-    // Validates AllDifferent constraint
-    // Converts to Circuit via ToCircuit()
+    public static bool Valid(IReadOnlyList<int> ints)  // a permutation of 0..n-1
+    public Circuit ToCircuit()
 }
 ```
 
 ### 4. Constraint Programming
 
-**Location**: `csharp/algorithm/constraint/Constraints.cs:30`
+**Location**: `csharp/algorithm/constraint/Constraints.cs`
 
 ```csharp
 public static class Constraints
 {
     // AllDifferent: All values must be unique
-    public static bool AllDifferent(this ICollection<int> ints)
-        => ints.Count == ints.Distinct().Count();
+    public static bool AllDifferent(this IReadOnlyCollection<int> ints)
+        => ints.Count == ints.ToHashSet().Count;
 
-    // Circuit: Represents Hamiltonian circuit (no self-loops, all different)
-    public static bool Circuit(this ICollection<int> ints)
-        => ints.AllDifferent() && !ints.Select((x, i) => (x, i)).Any(tp => tp.x == tp.i);
+    // Circuit: ints[i] is the successor of i and following them from 0 visits every node once
+    // before returning to 0 (no sub-tours, values in range, implies AllDifferent)
+    public static bool Circuit(this IReadOnlyList<int> ints)
 }
 ```
 
 ### 5. Data Transformation & Reindexing
 
-**Location**: `csharp/transform/Helper.cs:107`
+**Location**: `csharp/transform/Helper.cs`
 
 **Reindexer class**:
 - Handles multi-vehicle routing by replicating the depot
 - Maps customer IDs to internal indexes
-- **DepotIndexes**: `[0..2*nVehicles)` - Each vehicle gets a start/end depot pair
-- **VisitIndexes**: `[2*nVehicles..nCustomers]` - Customer visit nodes
+- **DepotIndexes**: `[0..2*nVehicles)` - Vehicle `i` has start depot `2i` and end depot `2i+1`
+- **EndDepotIndexes**: the odd depot indexes, whose successors stay fixed
+- **VisitIndexes**: `[2*nVehicles..2*nVehicles+nCustomers)` - Customer visit nodes
+- Requires at least one vehicle
 
 **Helper methods**:
-- `ToMatrix()`: Converts customer coordinates to Euclidean distance matrix
+- `ToMatrix()`: Converts customer coordinates to Euclidean distance matrix (customers looked up by `Id`)
 - `ToCircuit()`: Converts multi-route solution to single circuit
 - `Distance()`: Euclidean distance calculation
 
@@ -357,7 +387,7 @@ public static class Constraints
 public class Instance
 {
     public string Name { get; set; }
-    public int nVehicles { get; set; }
+    public int nVehicles { get; set; }       // JSON "vehicle-nr"
     public int Capacity { get; set; }
     public IList<Customer> Customers { get; set; }
 }
@@ -370,7 +400,7 @@ public class Instance
 ```csharp
 public class Customer
 {
-    public int Id { get; set; }              // customer-nr
+    public int Id { get; set; }              // JSON "cust-nr"
     public int X, Y { get; set; }            // Coordinates
     public (int x, int y) Coords => (X, Y);  // Tuple accessor
     public int Demand { get; set; }
@@ -403,7 +433,7 @@ public class Loader
 {
     public Loader(string type = "c", string version = "1", string nr = "01")
 
-    // Loads from solomon-vrptw-benchmarks/{type}/{version}/{name}.json
+    // Loads from {AppContext.BaseDirectory}/solomon-vrptw-benchmarks/{type}/{version}/{name}.json
     public Instance Instance()
 
     // Loads from solomon-vrptw-benchmarks/results/{name}.json
@@ -420,69 +450,38 @@ Example: `C101` = Clustered, version 1, instance 01
 
 ## Testing Approach
 
-### Current Status
+### Unit Tests
 
-**No formal testing framework** is currently configured. The project uses inline test assertions.
+The `csharp/tests` xUnit project covers:
 
-### Inline Testing
+- `algorithm/ConstraintsTests.cs`: AllDifferent, Circuit (sub-tours, out of range, self-loops)
+- `algorithm/RepresentationTests.cs`: Circuit <-> Route conversion and validation
+- `algorithm/ExplorerTests.cs`: the relocate move always yields a valid circuit, respects fixed
+  successors and can pick every node
+- `algorithm/SimulatedAnnealingTests.cs`: finds the optimal circuit of points on a circle with
+  every reduction function, keeps the best solution, stops without moves, is reproducible by
+  seed and rejects schedules that never end
+- `transform/HelperTests.cs`: Reindexer, ToCircuit, ToMatrix
+- `cli/LoaderTests.cs`: loads C101 and checks the best known cost of 828.94
 
-**Location**: `csharp/cli/Program.cs`
+`algorithm` exposes its internals to `tests` (`InternalsVisibleTo`) so `Explorer.Mover` can be tested.
 
-```csharp
-private static void Test(Circuit circuit, Route route)
-{
-    Debug.Assert(
-        circuit.ToRoute().List
-            .Zip(route.List)
-            .All(tp => tp.First == tp.Second));
-    Debug.Assert(
-        route.ToCircuit().Successors
-            .Zip(circuit.Successors)
-            .All(tp => tp.First == tp.Second));
-}
-
-private static void Test()
-{
-    Circuit circuit = new(new[] {1, 2, 0});
-    Route route = new(new[] {0, 1, 2});
-    Test(circuit, route);
-    // ... more test cases
-}
+```bash
+cd /home/user/simulated-annealing/csharp
+dotnet test
 ```
 
-Called in `Main()` via `Test();`
+### Inline Validation
 
-### Validation
-
-Uses `Debug.Assert()` throughout codebase (6 occurrences) for runtime validation:
-- Circuit/Route conversion correctness
-- Constraint validation
-- Neighborhood generation validity
-
-### Recommendations for Testing
-
-If adding formal tests, consider:
-
-1. **Add xUnit/NUnit project**:
-   ```bash
-   dotnet new xunit -n tests
-   dotnet sln add tests/tests.csproj
-   ```
-
-2. **Test Coverage Areas**:
-   - Constraint validation (AllDifferent, Circuit)
-   - Circuit ↔ Route conversion
-   - Reindexer mapping logic
-   - Distance matrix generation
-   - Neighborhood generation
-   - Temperature reduction strategies
-   - Solution acceptance logic
+`csharp/cli/Program.cs` also runs a few `Debug.Assert` checks of the Circuit/Route conversion and the
+C101 best known cost at startup, and `SimulatedAnnealing` asserts each candidate is a valid circuit.
+Run in Debug mode to enable them.
 
 ## Common Development Tasks
 
 ### Adding a New Temperature Reduction Strategy
 
-1. Add enum value to `ReductionFunction` in `csharp/algorithm/solver/SimulatedAnnealing.cs:10`
+1. Add enum value to `ReductionFunction` in `csharp/algorithm/solver/SimulatedAnnealing.cs`
 2. Create reduction method following pattern:
    ```csharp
    private void MyNewReduction() => _currTemp = /* formula */;
@@ -492,10 +491,12 @@ If adding formal tests, consider:
    _decrementRule = tempReduction switch
    {
        // ...
-       ReductionFunction.myNew => MyNewReduction,
+       ReductionFunction.myNew when /* parameters valid */ => MyNewReduction,
        _ => throw new ArgumentOutOfRangeException(nameof(tempReduction))
    };
    ```
+4. Only accept parameters that strictly decrease the temperature towards `finalTemp`,
+   otherwise `Run()` never ends, and add a case to `SimulatedAnnealingTests`
 
 ### Adding a New Constraint
 
@@ -514,8 +515,8 @@ If adding formal tests, consider:
 
 Edit `csharp/algorithm/solver/Explorer.cs`:
 
-- `EdgePicker()`: Change edge selection strategy
-- `Mover()`: Modify neighborhood generation (currently 3-edge exchange)
+- `Mover()`: Modify neighborhood generation (currently a relocate, a 3-edge exchange)
+- Return only valid circuits and leave `null` (fixed) successors unchanged, `ExplorerTests` checks both
 - Consider impact on solution space connectivity
 
 ### Loading Different Benchmark Instances
@@ -535,64 +536,35 @@ Loader ld = new("rc", "1", "08");
 
 ### Adjusting SA Parameters
 
-In `csharp/cli/Program.cs`, modify `SimulatedAnnealing` constructor:
+In `csharp/cli/Program.cs`, modify the `SimulatedAnnealing` constructor:
 
 ```csharp
-SimulatedAnnealing sa = new(
-    initialSolution: /* Circuit */,
-    solutionEvaluator: /* Func */,
-    neighborhoodSelector: /* Func */,
-    initialTemp: 10,              // Increase for more exploration
-    finalTemp: 1,                 // Decrease for more exploitation
+SimulatedAnnealing solver = new(
+    initial,
+    evaluator,
+    neighborOperator,
+    initialTemp: 100,            // Increase for more exploration, relative to the move deltas
+    finalTemp: 0.1,              // Decrease for more exploitation, must be > 0
     tempReduction: ReductionFunction.geometric,  // Try linear, slowDecrease
-    iterationPerTemp: 100         // Increase for more thorough search
-);
+    iterationPerTemp: 1000,      // Increase for more thorough search
+    alpha: 0.95);                // Geometric factor, closer to 1 cools slower
 ```
 
 ## Known TODOs & Areas for Improvement
 
-### Active TODOs in Code
-
-1. `csharp/algorithm/solver/Explorer.cs:23` - "TODO: >= or >"
-2. `csharp/algorithm/solver/Explorer.cs:31` - "TODO tidy"
-3. `csharp/algorithm/solver/Explorer.cs:42` - "TODO: verify"
-4. `csharp/algorithm/solver/Explorer.cs:47` - "TODO: Optimize"
-5. `csharp/algorithm/constraint/Circuit.cs:21` - "TODO: Needed? Circuit implies AllDifferent"
-6. `csharp/algorithm/constraint/Circuit.cs:24` - "TODO: test"
-
 ### Areas Needing Enhancement
 
-1. **Documentation**
+1. **Capacity and Time Window Constraints**
+   - Instance has `Capacity`, customers have `Demand` and `Earliest`/`Latest` time windows
+   - Not enforced by the solver, which only minimizes distance, so its cost is lower than and
+     not comparable to the best known solutions
+2. **Documentation**
    - No README.md in root directory
-   - Minimal XML documentation comments (only 3 instances)
-   - Consider adding algorithm explanations
-
-2. **Testing**
-   - No formal testing framework (xUnit/NUnit/MSTest)
-   - Add unit tests for core algorithms
-   - Add integration tests for end-to-end solving
-
 3. **CI/CD**
    - No GitHub Actions or CI configuration
-   - Consider adding automated build/test workflows
-
-4. **Benchmark Submodule**
-   - May need initialization: `git submodule update --init`
-   - Verify JSON files are accessible
-
-5. **Code Coverage**
-   - No coverage tooling configured
-   - Consider adding coverlet for .NET code coverage
-
-6. **Time Window Constraints**
-   - Customer model has `Earliest`/`Latest` time windows
-   - Not currently enforced in solver
-   - Consider adding time window validation
-
-7. **Capacity Constraints**
-   - Instance has `Capacity` and customers have `Demand`
-   - Not currently enforced in solver
-   - Consider adding capacity validation
+4. **Performance**
+   - Each iteration copies the successors and evaluates the full candidate cost (O(n));
+     the relocate move's delta could be computed from its 6 edges in O(1)
 
 ## Working with This Codebase
 
@@ -607,10 +579,10 @@ SimulatedAnnealing sa = new(
 ### When Making Changes
 
 1. **Read existing code first**: Understand patterns before modifying
-2. **Follow .editorconfig**: Respect formatting conventions (4 spaces, UTF-8 BOM, CRLF)
+2. **Follow the existing files**: 4 spaces; the files are LF without a BOM despite `.editorconfig`
 3. **Use expression-bodied members**: For concise methods/properties
 4. **Add XML docs**: For public APIs, especially in algorithm/constraint namespaces
-5. **Update TODOs**: Address or remove TODO comments when working in those areas
+5. **Run the tests**: `dotnet test` from `csharp/`, and add tests for new behavior
 6. **Test conversions**: When modifying Circuit/Route, verify bidirectional conversion
 7. **Validate constraints**: Ensure AllDifferent and Circuit constraints remain satisfied
 8. **Commit with convention**: Use `<component>: <description>` format
@@ -618,14 +590,14 @@ SimulatedAnnealing sa = new(
 ### Performance Considerations
 
 1. **LINQ overhead**: Extensive LINQ may impact performance in tight loops
-2. **Random number generation**: `Explorer` uses `Random` - consider seed for reproducibility
+2. **Random number generation**: `SimulatedAnnealing` takes a `seed` (default 1) for reproducibility
 3. **Distance matrix**: Pre-computed, not recalculated (good)
-4. **Neighborhood size**: Currently generates all neighbors - may be memory-intensive for large instances
+4. **Per iteration cost**: O(n) for the move, candidate copy, predecessors and evaluation
 
 ### Debugging Tips
 
 1. **Enable Debug.Assert**: Run in Debug mode to catch assertion failures
-2. **Solution validation**: Use `Circuit.Successors.Circuit()` to validate solutions
+2. **Solution validation**: Use `Circuit.Valid(successors)` to validate solutions
 3. **Cost tracking**: Monitor cost improvements in SA loop
 4. **Temperature schedule**: Log temperature values to verify reduction strategy
 5. **Acceptance rate**: Track accepted/rejected moves to tune parameters
@@ -637,13 +609,13 @@ SimulatedAnnealing sa = new(
 - Solution file: `csharp/sim-an.sln`
 
 ### Core Algorithm
-- Simulated Annealing: `csharp/algorithm/solver/SimulatedAnnealing.cs:125`
-- Neighborhood Explorer: `csharp/algorithm/solver/Explorer.cs:147`
+- Simulated Annealing: `csharp/algorithm/solver/SimulatedAnnealing.cs`
+- Neighborhood Explorer: `csharp/algorithm/solver/Explorer.cs`
 
 ### Constraints & Representations
-- Constraints: `csharp/algorithm/constraint/Constraints.cs:30`
-- Circuit: `csharp/algorithm/constraint/Circuit.cs:52`
-- Route: `csharp/algorithm/constraint/Route.cs:42`
+- Constraints: `csharp/algorithm/constraint/Constraints.cs`
+- Circuit: `csharp/algorithm/constraint/Circuit.cs`
+- Route: `csharp/algorithm/constraint/Route.cs`
 
 ### Data Models
 - Instance: `csharp/data_layer/Instance.cs`
@@ -651,7 +623,7 @@ SimulatedAnnealing sa = new(
 - Result: `csharp/data_layer/Result.cs`
 
 ### Utilities
-- Transformations: `csharp/transform/Helper.cs:107`
+- Transformations: `csharp/transform/Helper.cs`
 - Benchmark Loader: `csharp/cli/Loader.cs`
 
 ### Configuration
@@ -663,7 +635,7 @@ SimulatedAnnealing sa = new(
 
 ### Solomon VRPTW Benchmarks
 - Submodule: `solomon-vrptw-benchmarks/`
-- GitHub: `git@github.com:CervEdin/solomon-vrptw-benchmarks.git`
+- GitHub: `https://github.com/CervEdin/solomon-vrptw-benchmarks.git`
 - Format: JSON files with instances and optimal/best-known solutions
 
 ### Algorithm Reference
@@ -673,7 +645,6 @@ SimulatedAnnealing sa = new(
 
 ---
 
-**Last Updated**: 2025-11-23
-**Total Lines of C# Code**: ~675 lines across 11 files
-**Target Framework**: .NET 5.0
+**Last Updated**: 2026-09-26
+**Target Framework**: .NET 8.0
 **Primary IDE**: JetBrains Rider

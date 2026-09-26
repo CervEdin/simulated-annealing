@@ -14,9 +14,14 @@ namespace transform
         public bool Feasible => Overload == 0 && Lateness == 0;
 
         /// <summary>
+        /// How much the constraints are violated, 0 if the solution is feasible
+        /// </summary>
+        public double Violation => Overload + Lateness;
+
+        /// <summary>
         /// The distance plus lambda times the constraint violations
         /// </summary>
-        public double Penalized(double lambda) => Distance + lambda * (Overload + Lateness);
+        public double Penalized(double lambda) => Distance + lambda * Violation;
     }
 
     /// <summary>

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using algorithm.constraint;
 using algorithm.solver;
@@ -12,7 +13,7 @@ namespace cli
     internal static class Program
     {
         // The penalty per unit of overload and lateness
-        private const double Lambda = 10;
+        private const double Lambda = 100;
 
         private static void Test(Circuit circuit, Route route)
         {
@@ -43,18 +44,53 @@ namespace cli
                 Environment.Exit(1);
             };
             Test();
-            Loader loader = new();
+            // e.g. r 1 01 for R101, C101 by default
+            Loader loader = args.Length == 3 ? new Loader(args[0], args[1], args[2]) : new Loader();
             Instance instance = loader.Instance();
-            Result result = loader.Result();
             Reindexer reindexer = new(instance.nVehicles, instance.Customers.Count - 1);
-            Route optimalRoute = new(result.Solution.ToCircuit(reindexer).ToArray());
-            var optimalCircuit = optimalRoute.ToCircuit();
-            Test(optimalCircuit, optimalRoute);
             VrptwEvaluator evaluator = new(instance.Customers, instance.Capacity, reindexer);
-            double optimalCost = evaluator.Evaluate(optimalCircuit.Successors).Distance;
-            Debug.Assert(Math.Abs(828.94 - optimalCost) < 0.01);
-            Circuit initial = optimalCircuit;
+            Console.WriteLine($"instance:\t{instance.Name}");
 
+            double? bestKnownCost = null;
+            Result? result = BestKnown(loader);
+            if (result != null)
+            {
+                Route bestKnownRoute = new(result.Solution.ToCircuit(reindexer).ToArray());
+                var bestKnownCircuit = bestKnownRoute.ToCircuit();
+                Test(bestKnownCircuit, bestKnownRoute);
+                bestKnownCost = evaluator.Evaluate(bestKnownCircuit.Successors).Distance;
+                Debug.Assert(instance.Name != "C101" || Math.Abs(828.94 - bestKnownCost.Value) < 0.01);
+                Console.WriteLine($"best known solution cost:\t{bestKnownCost:F2}");
+                Solve("best known", bestKnownCircuit, evaluator, reindexer, bestKnownCost);
+            }
+
+            var routes = Construction.NearestNeighbor(instance.Customers, instance.Capacity, instance.nVehicles);
+            Circuit constructed = new Route(routes.ToCircuit(reindexer)).ToCircuit();
+            Report("construction", constructed, evaluator, bestKnownCost);
+            Solve("construction", constructed, evaluator, reindexer, bestKnownCost);
+        }
+
+        private static Result? BestKnown(Loader loader)
+        {
+            try
+            {
+                return loader.Result();
+            }
+            catch (FileNotFoundException)
+            {
+                // Not every instance has a published result
+                return null;
+            }
+        }
+
+        private static void Solve(
+            string start,
+            Circuit initial,
+            VrptwEvaluator evaluator,
+            Reindexer reindexer,
+            double? bestKnownCost
+        )
+        {
             Func<IEnumerable<int>, double> evaluate = x => evaluator.Evaluate(x.ToArray()).Penalized(Lambda);
             Func<IEnumerable<int>, bool> isFeasible = x => evaluator.Evaluate(x.ToArray()).Feasible;
             // The end depots are always followed by the next vehicle's start depot
@@ -65,20 +101,36 @@ namespace cli
                 initial,
                 evaluate,
                 neighborOperator,
-                initialTemp: 100,
+                initialTemp: 10,
                 finalTemp: 0.1,
                 tempReduction: ReductionFunction.geometric,
-                iterationPerTemp: 1000,
+                iterationPerTemp: 10000,
                 alpha: 0.95,
                 isFeasible: isFeasible);
+            Stopwatch stopwatch = Stopwatch.StartNew();
             var solution = solver.Run();
-            Evaluation found = evaluator.Evaluate(solution.Successors);
-            Console.WriteLine($"best known solution cost:\t{optimalCost:F2}");
-            Console.WriteLine($"found solution cost:\t{found.Distance:F2}");
-            Console.WriteLine($"feasible:\t{found.Feasible}"
-                              + $" (overload {found.Overload}, lateness {found.Lateness:F2})");
-            Console.WriteLine($"vehicles used:\t{evaluator.VehiclesUsed(solution.Successors)}");
-            Console.WriteLine($"gap:\t{100 * (found.Distance - optimalCost) / optimalCost:F2}%");
+            Report($"annealed from {start} in {stopwatch.Elapsed.TotalSeconds:F1}s", solution, evaluator,
+                bestKnownCost);
+        }
+
+        private static void Report(
+            string name,
+            Circuit solution,
+            VrptwEvaluator evaluator,
+            double? bestKnownCost
+        )
+        {
+            Evaluation evaluation = evaluator.Evaluate(solution.Successors);
+            Console.WriteLine(name);
+            Console.WriteLine($"  found solution cost:\t{evaluation.Distance:F2}");
+            Console.WriteLine($"  feasible:\t{evaluation.Feasible}"
+                              + $" (overload {evaluation.Overload}, lateness {evaluation.Lateness:F2})");
+            Console.WriteLine($"  vehicles used:\t{evaluator.VehiclesUsed(solution.Successors)}");
+            if (!bestKnownCost.HasValue)
+                return;
+            double gap = 100 * (evaluation.Distance - bestKnownCost.Value) / bestKnownCost.Value;
+            // A rounded 0 prints without a sign
+            Console.WriteLine($"  gap:\t{gap:0.00;-0.00;0.00}%");
         }
     }
 }

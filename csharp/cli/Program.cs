@@ -12,8 +12,8 @@ namespace cli
 {
     internal static class Program
     {
-        // The penalty per unit of overload and lateness
-        private const double Lambda = 100;
+        // The initial penalty per unit of overload and lateness, it grows as the temperature drops (to 1000)
+        private const double Lambda = 10;
 
         private static void Test(Circuit circuit, Route route)
         {
@@ -109,11 +109,14 @@ namespace cli
                 tempReduction: ReductionFunction.geometric,
                 iterationPerTemp: 10000,
                 alpha: 0.95,
-                penalty: Lambda);
+                penalty: Lambda,
+                penaltyUpdate: PenaltyUpdate.cooling);
             Stopwatch stopwatch = Stopwatch.StartNew();
             var solution = solver.Run();
             Report($"annealed from {start} in {stopwatch.Elapsed.TotalSeconds:F1}s", solution, evaluator,
                 bestKnownCost);
+            if (!solver.FoundFeasible)
+                Console.WriteLine("  no feasible solution found, this is the least violating one");
         }
 
         private static void Report(
@@ -126,8 +129,9 @@ namespace cli
             Evaluation evaluation = evaluator.Evaluate(solution.Successors);
             Console.WriteLine(name);
             Console.WriteLine($"  found solution cost:\t{evaluation.Distance:F2}");
-            Console.WriteLine($"  feasible:\t{evaluation.Feasible}"
-                              + $" (overload {evaluation.Overload}, lateness {evaluation.Lateness:F2})");
+            Console.WriteLine(evaluation.Feasible
+                ? "  feasible:\tyes"
+                : $"  feasible:\tNO (overload {evaluation.Overload}, lateness {evaluation.Lateness:F2})");
             Console.WriteLine($"  vehicles used:\t{evaluator.VehiclesUsed(solution.Successors)}");
             if (!bestKnownCost.HasValue)
                 return;

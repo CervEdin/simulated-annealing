@@ -8,11 +8,6 @@ namespace transform
 {
     public static class Helper
     {
-        // ReSharper disable once UnusedMember.Local
-        private static double Distance(
-            ((int, int), (int, int)) tp
-        ) => Distance(tp.Item1, tp.Item2);
-
         private static double Distance(
             (int x, int y) p1,
             (int x, int y) p2
@@ -23,11 +18,12 @@ namespace transform
             Reindexer reindexer
         )
         {
+            var byId = customers.ToDictionary(c => c.Id);
             return ToMatrix(
                 reindexer
                     .AllIndexes
                     .Select(reindexer.CustomerId)
-                    .Select(i => customers[i].Coords)
+                    .Select(id => byId[id].Coords)
             );
         }
 
@@ -54,7 +50,7 @@ namespace transform
                         .Concat(route
                             .Select(id => reindexer
                                 .CustomerIndexes(id)
-                                .FirstOrDefault()))
+                                .Single()))
                         .Concat(new[] { 2 * i + 1 })
                 );
             var missingDepots = reindexer.DepotIndexes
@@ -81,6 +77,10 @@ namespace transform
 
         public Reindexer(int nVehicles, int nCustomers)
         {
+            if (nVehicles < 1)
+                throw new ArgumentOutOfRangeException(nameof(nVehicles));
+            if (nCustomers < 0)
+                throw new ArgumentOutOfRangeException(nameof(nCustomers));
             _nVehicles = nVehicles;
             _nCustomers = nCustomers;
         }
@@ -88,21 +88,29 @@ namespace transform
         public IEnumerable<int> AllIndexes
             => DepotIndexes.Concat(VisitIndexes);
 
+        private int LastDepot => _nVehicles * 2 - 1;
+
+        /// <summary>
+        /// Each vehicle has a start depot 2i and an end depot 2i + 1
+        /// </summary>
         public IEnumerable<int> DepotIndexes
             => Enumerable.Range(0, _nVehicles * 2);
 
-        private IEnumerable<int> VisitIndexes
-            => Enumerable.Range(DepotIndexes.Last() + 1, _nCustomers);
+        public IEnumerable<int> EndDepotIndexes
+            => DepotIndexes.Where(i => i % 2 == 1);
 
-        public int CustomerId(int index) => DepotIndexes.Contains(index)
+        private IEnumerable<int> VisitIndexes
+            => Enumerable.Range(LastDepot + 1, _nCustomers);
+
+        public int CustomerId(int index) => index <= LastDepot
             ? 0
-            : index - DepotIndexes.Last();
+            : index - LastDepot;
 
         public IEnumerable<int> CustomerIndexes(int id)
         {
             return id == 0
                 ? DepotIndexes
-                : VisitIndexes.Where(i => i - DepotIndexes.Last() == id);
+                : VisitIndexes.Where(i => i - LastDepot == id);
         }
     }
 }

@@ -2,7 +2,7 @@
 
     <PropertyGroup>
         <TargetFramework>net8.0</TargetFramework>
-        <RootNamespace>transformer</RootNamespace>
+        <RootNamespace>transform</RootNamespace>
     </PropertyGroup>
 
     <ItemGroup>

@@ -20,6 +20,7 @@ namespace algorithm.solver
 
         private readonly Action _decrementRule;
         private readonly Func<IEnumerable<int>, double> _evaluate;
+        private readonly Func<IEnumerable<int>, bool> _isFeasible;
         private readonly double _finalTemp;
         private readonly int _iterationPerTemp;
 
@@ -31,6 +32,7 @@ namespace algorithm.solver
         private readonly Random _random;
         private int[] _bestSuccessors;
         private double _bestCost;
+        private bool _foundFeasible;
         private double _currTemp;
 
         private int[] _successors;
@@ -47,6 +49,10 @@ namespace algorithm.solver
         /// <param name="alpha">linear: the step (&gt; 0), geometric: the factor (between 0 and 1)</param>
         /// <param name="beta">slowDecrease: T = T / (1 + beta * T) (&gt; 0)</param>
         /// <param name="seed">Seed for the random number generator</param>
+        /// <param name="isFeasible">
+        /// Whether a solution satisfies the constraints the cost only penalizes, null if every solution does.
+        /// The best solution is the best feasible one, or the best of all if none is.
+        /// </param>
         public SimulatedAnnealing(
             Circuit initialSolution,
             Func<IEnumerable<int>, double> solutionEvaluator,
@@ -57,7 +63,8 @@ namespace algorithm.solver
             int iterationPerTemp = 100,
             double alpha = 0.9,
             double beta = 0.01,
-            int seed = 1
+            int seed = 1,
+            Func<IEnumerable<int>, bool> isFeasible = null
         )
         {
             if (finalTemp <= 0)
@@ -69,8 +76,10 @@ namespace algorithm.solver
             _predecessors = _successors.Predecessors();
             _evaluate = solutionEvaluator;
             _cost = _evaluate(_successors);
+            _isFeasible = isFeasible ?? (_ => true);
             _bestSuccessors = _successors;
             _bestCost = _cost;
+            _foundFeasible = _isFeasible(_successors);
             _currTemp = initialTemp;
             _finalTemp = finalTemp;
             _iterationPerTemp = iterationPerTemp;
@@ -98,6 +107,11 @@ namespace algorithm.solver
         private void SlowDecreaseTempReduction() => _currTemp /= 1 + _beta * _currTemp;
 
         public double BestCost => _bestCost;
+
+        /// <summary>
+        /// Whether the best solution is feasible
+        /// </summary>
+        public bool FoundFeasible => _foundFeasible;
 
         public Circuit Run()
         {
@@ -140,13 +154,24 @@ namespace algorithm.solver
             _successors = candidateSolution;
             _cost = candidateCost;
             _predecessors = _successors.Predecessors();
-            if (_cost < _bestCost)
-            {
-                _bestSuccessors = _successors;
-                _bestCost = _cost;
-            }
-
+            UpdateBest();
             return true;
+        }
+
+        /// <summary>
+        /// Keep the current solution if it is the best feasible one, or the best so far while none is feasible
+        /// </summary>
+        private void UpdateBest()
+        {
+            // Only check the feasibility of solutions that could replace the best
+            if (_foundFeasible && _cost >= _bestCost)
+                return;
+            bool feasible = _isFeasible(_successors);
+            if (!feasible && (_foundFeasible || _cost >= _bestCost))
+                return;
+            _bestSuccessors = _successors;
+            _bestCost = _cost;
+            _foundFeasible = feasible;
         }
     }
 }
